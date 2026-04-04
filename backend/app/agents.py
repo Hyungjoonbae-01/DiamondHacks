@@ -69,6 +69,30 @@ class AgentRunResult:
     status: str = "complete"
 
 
+_AGENT_SECTION_TITLES: dict[str, str] = {
+    "topo_map": "TOPO / MAP CANDIDATES",
+    "land_rules": "LAND RULES & PERMITS",
+    "community_intel": "COMMUNITY INTEL",
+}
+
+
+def format_combined_report(area: str, results: list[AgentRunResult]) -> str:
+    """Single plain-text document for copy/paste, curl, or text/plain responses."""
+    lines = [
+        f"Dispersed camping research — {area.strip()}",
+        "",
+    ]
+    for r in results:
+        title = _AGENT_SECTION_TITLES.get(r.agent_id, r.agent_id.upper())
+        lines.append(f"{'=' * 60}")
+        lines.append(f" {title}  ({r.agent_id})  [{r.status}]")
+        lines.append(f"{'=' * 60}")
+        body = (r.error or r.output or "").strip() or "(no output)"
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 async def _run_one_agent(
     client: AsyncBrowserUse,
     agent_id: str,
