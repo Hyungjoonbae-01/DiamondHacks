@@ -1,3 +1,5 @@
 fastapi
 uvicorn[standard]
 pydantic
+browser-use-sdk
+python-dotenv

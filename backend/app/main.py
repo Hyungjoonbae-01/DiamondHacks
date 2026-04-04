@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import example
+from app.routers import browser_agents, example
 
 app = FastAPI(title="DiaHacks API")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(example.router, prefix="/api")
+app.include_router(browser_agents.router, prefix="/api")
 
 
 @app.get("/health")
