@@ -32,44 +32,51 @@ export function CampingApp() {
     setAgentLiveUrls([null, null, null]);
     setAgentApiError(null);
 
-    /** Start each Browser Use agent in its own request so sessions open one after another. */
+    /** Start all Browser Use sessions in parallel so cloud browsers spin up together (no queue behind prior creates). */
     const startBrowserAgents = async () => {
-      const urls = [null, null, null];
+      const bodyBase = {
+        location,
+        radius: prefs.radius,
+        features: prefs.features,
+      };
       try {
-        for (let i = 0; i < AGENT_IDS_ORDER.length; i++) {
-          const res = await fetch(`${API_BASE}/api/browser-agents/start-live`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location,
-              radius: prefs.radius,
-              features: prefs.features,
-              agent_id: AGENT_IDS_ORDER[i],
-            }),
-          });
-          if (!res.ok) {
-            let message = `Agent ${AGENT_IDS_ORDER[i]} could not start (HTTP ${res.status}).`;
-            try {
-              const errBody = await res.json();
-              const d = errBody?.detail;
-              if (typeof d === "string") message = d;
-              else if (Array.isArray(d))
-                message = d.map((x) => x?.msg ?? JSON.stringify(x)).join(" ");
-            } catch {
-              /* ignore */
+        await Promise.all(
+          AGENT_IDS_ORDER.map(async (agent_id, i) => {
+            const res = await fetch(`${API_BASE}/api/browser-agents/start-live`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...bodyBase, agent_id }),
+            });
+            if (!res.ok) {
+              let message = `Agent ${agent_id} could not start (HTTP ${res.status}).`;
+              try {
+                const errBody = await res.json();
+                const d = errBody?.detail;
+                if (typeof d === "string") message = d;
+                else if (Array.isArray(d))
+                  message = d.map((x) => x?.msg ?? JSON.stringify(x)).join(" ");
+              } catch {
+                /* ignore */
+              }
+              setAgentApiError(message);
+              throw new Error(message);
             }
-            setAgentApiError(message);
-            return;
-          }
-          const data = await res.json();
-          const row = data.agents?.[0];
-          urls[i] = row?.live_url ?? null;
-          setAgentLiveUrls([...urls]);
-        }
-      } catch {
-        setAgentApiError(
-          `Could not reach the API at ${API_BASE}. Is the backend running?`
+            const data = await res.json();
+            const row = data.agents?.[0];
+            const liveUrl = row?.live_url ?? null;
+            setAgentLiveUrls((prev) => {
+              const next = [...prev];
+              next[i] = liveUrl;
+              return next;
+            });
+          })
         );
+      } catch (e) {
+        if (!(e instanceof Error) || !String(e.message).includes("could not start")) {
+          setAgentApiError(
+            `Could not reach the API at ${API_BASE}. Is the backend running?`
+          );
+        }
       }
     };
 
