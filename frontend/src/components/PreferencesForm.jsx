@@ -132,6 +132,9 @@ export function PreferencesForm({ onSubmit }) {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
+              name="camping-location"
+              autoComplete="off"
+              enterKeyHint="search"
               placeholder="Search for a city, park, or region..."
               value={location}
               onChange={(e) => setLocation(e.target.value)}
