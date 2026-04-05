@@ -10,3 +10,6 @@ frontend/dist/
 
 # Env
 .env
+
+# Local tooling
+.claude/

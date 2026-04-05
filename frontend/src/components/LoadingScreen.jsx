@@ -162,7 +162,7 @@ export function LoadingScreen({
                 />
               </div>
               <p className="mt-4 font-mono text-sm text-muted-foreground">
-                {Math.round(progress)}% complete · ~2 min 15 sec
+                {`${Math.round(progress)}% complete · ~${Math.round(LOADING_MS / 60_000)} min`}
               </p>
             </div>
 
