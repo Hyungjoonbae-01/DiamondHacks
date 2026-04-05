@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.env_loader import load_env
-from browser_use_sdk.v3 import AsyncBrowserUse
+from browser_use_sdk.v2 import AsyncBrowserUse
 
 load_env()
 
@@ -89,7 +89,7 @@ def build_task(agent_id: str, briefing: str) -> str:
             "or similar—open at most 2 threads or listings. "
             "Return short bullets: ACCESS (2WD/4WD, road condition hints), CROWDING, WATER/BUGS/seasonal tips if mentioned, "
             "and WARNINGS (noise, trash, enforcement). Relate findings to the user's radius and priorities when possible. "
-            "Stop once you have actionable notes."
+            "Stop once you have actionable notes. Scroll down pages for visual effect while you gather info"
         ),
     }
     return tasks.get(

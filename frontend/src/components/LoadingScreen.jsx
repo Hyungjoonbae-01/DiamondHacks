@@ -11,37 +11,25 @@ const loadingSteps = [
   { icon: Mountain, text: "Preparing recommendations..." },
 ];
 
-const agentPanels = [
-  { id: "topo", label: "Topo / map", position: "top-left" },
-  { id: "land", label: "Land rules", position: "bottom-left" },
-  { id: "community", label: "Community intel", position: "bottom-right" },
-];
-
-function AgentVideoCard({ label, liveUrl, positionClass }) {
+function AgentTile({ label, liveUrl }) {
   const embedSrc = browserUseIframeSrc(liveUrl);
   return (
-    <div
-      className={`fixed z-[32] w-[min(92vw,17.5rem)] sm:w-80 md:w-[22rem] lg:w-96 ${positionClass}`}
-    >
-      <div className="rounded-2xl border border-border/70 bg-card/95 p-3 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md">
-        <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/80">
-          {label}
-        </p>
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black shadow-inner ring-1 ring-black/20">
-          {embedSrc ? (
-            <iframe
-              title={label}
-              src={embedSrc}
-              className="absolute inset-0 block h-full w-full border-0"
-              allow="autoplay; fullscreen; clipboard-read; clipboard-write"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          ) : (
-            <div className="flex h-full min-h-[100px] items-center justify-center px-3 text-center text-xs leading-snug text-muted-foreground">
-              Live view when this agent starts…
-            </div>
-          )}
+    <div className="absolute inset-0 bg-black/20">
+      {embedSrc ? (
+        <iframe
+          title={label}
+          src={embedSrc}
+          className="h-full w-full border-0"
+          allow="autoplay; fullscreen; clipboard-read; clipboard-write"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground/40">
+          {label} stream initializing...
         </div>
+      )}
+      <div className="absolute bottom-3 left-3 z-10 rounded-md bg-black/50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white/70 backdrop-blur-sm">
+        {label}
       </div>
     </div>
   );
@@ -76,22 +64,22 @@ export function LoadingScreen({
    * md+: anchor from 50vw so cards sit in screen wings with ~8rem gap to center loader.
    * sm: corner insets; cards are smaller on narrow viewports to reduce overlap.
    */
-  const positions = [
-    "left-3 top-[5.75rem] sm:left-4 sm:top-24 md:left-[max(1rem,calc(50vw-32rem))] md:top-28 lg:top-[7.5rem]",
-    "left-3 bottom-6 sm:left-4 sm:bottom-8 md:left-[max(1rem,calc(50vw-32rem))] md:bottom-12 lg:bottom-14",
-    "right-3 bottom-6 sm:right-4 sm:bottom-8 md:left-[min(calc(50vw+8rem),calc(100vw-26rem))] md:right-auto md:bottom-12 lg:bottom-14",
-  ];
-
   return (
-    <section className="fixed inset-0 z-50 bg-background">
-      {agentPanels.map((agent, i) => (
-        <AgentVideoCard
-          key={agent.id}
-          label={agent.label}
-          liveUrl={agentLiveUrls[i] ?? null}
-          positionClass={`${positions[i]} pointer-events-auto`}
-        />
-      ))}
+    <section className="fixed inset-0 z-50 overflow-hidden bg-background">
+      {/* Agent Tiling Background */}
+      <div className="absolute inset-0 z-0 flex">
+        <div className="relative h-full w-1/2 border-r border-white/10">
+          <AgentTile label="Community Intel" liveUrl={agentLiveUrls[2]} />
+        </div>
+        <div className="flex h-full w-1/2 flex-col">
+          <div className="relative h-1/2 border-b border-white/10">
+            <AgentTile label="Topo / Map" liveUrl={agentLiveUrls[0]} />
+          </div>
+          <div className="relative h-1/2">
+            <AgentTile label="Land Rules" liveUrl={agentLiveUrls[1]} />
+          </div>
+        </div>
+      </div>
 
       {/* Logo + attribution — card */}
       <div className="fixed right-4 top-4 z-[36] flex max-w-[min(calc(100vw-2rem),280px)] items-center gap-3 rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md">
@@ -108,7 +96,7 @@ export function LoadingScreen({
 
       {/* Loader sits below video layer so corners stay visible; narrow column only */}
       <div className="pointer-events-none relative z-[28] flex min-h-full flex-col items-center justify-center px-6 py-20">
-        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/70 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
+        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/60 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
           {agentApiError && (
             <p
               role="alert"
