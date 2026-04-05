@@ -1,4 +1,9 @@
-"""Start Browser Use agents and return live session URLs for iframe embedding."""
+"""Start Browser Use agents and return live session URLs for iframe embedding.
+
+Official flow: POST /sessions with ``task`` so ``liveUrl`` matches the session that
+runs the task (see Browser Use live preview docs). Do not create an empty session
+then call ``run`` separately—that can leave the iframe on the wrong session.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,6 @@ import asyncio
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,10 +19,11 @@ from app.agents import AGENT_IDS, build_camper_briefing, build_task
 router = APIRouter(tags=["browser-agents"])
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_BACKEND_ROOT / ".env")
+
+# Seconds to wait between starting each agent (one session create at a time).
+_AGENT_STAGGER_S = float(os.getenv("BROWSER_USE_AGENT_STAGGER_S", "2"))
 
 _client = None
-_background_tasks: set[asyncio.Task] = set()
 
 
 def _get_client():
@@ -37,49 +42,56 @@ def _get_client():
 
 
 class StartLiveBody(BaseModel):
-    """Same shape as the CampingApp preferences payload (minus coordinates)."""
+    """CampingApp preferences plus optional ``agent_id`` to start one agent per request."""
 
     location: str
     radius: int = 25
     features: list[str] = Field(default_factory=list)
+    agent_id: str | None = None
 
 
 @router.post("/browser-agents/start-live")
 async def start_live(body: StartLiveBody):
-    """Create three sessions, return live_url for each, and run tasks in the background."""
+    """Create agent session(s) with tasks; each ``live_url`` is the official embed target.
+
+    Pass ``agent_id`` (one of ``topo_map``, ``land_rules``, ``community_intel``) to start
+    a single agent. Omit it to start all three in one call, staggered by
+    ``BROWSER_USE_AGENT_STAGGER_S`` seconds between each.
+    """
     loc = body.location.strip()
     if not loc:
         raise HTTPException(status_code=400, detail="location is required")
 
     briefing = build_camper_briefing(loc, body.radius, body.features)
 
+    if body.agent_id is not None:
+        if body.agent_id not in AGENT_IDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown agent_id {body.agent_id!r}; expected one of {AGENT_IDS}.",
+            )
+        ids_to_run: tuple[str, ...] = (body.agent_id,)
+    else:
+        ids_to_run = AGENT_IDS
+
     client = _get_client()
-    model = os.getenv("BROWSER_USE_MODEL", "").strip()
+    model = os.getenv("BROWSER_USE_MODEL", "").strip() or None
     out: list[dict] = []
 
-    for aid in AGENT_IDS:
-        session = await client.sessions.create()
-        sid = getattr(session, "id", None)
-        live = getattr(session, "live_url", None)
+    for i, aid in enumerate(ids_to_run):
+        if i > 0:
+            await asyncio.sleep(_AGENT_STAGGER_S)
         task_text = build_task(aid, briefing)
-
-        async def run_agent(
-            session_id: str | None = sid,
-            task_str: str = task_text,
-        ):
-            if not session_id:
-                return
-            run_kw: dict = {"session_id": session_id}
-            if model:
-                run_kw["model"] = model
-            try:
-                await client.run(task_str, **run_kw)
-            except Exception:
-                pass
-
-        t = asyncio.create_task(run_agent())
-        _background_tasks.add(t)
-        t.add_done_callback(_background_tasks.discard)
-        out.append({"agent_id": aid, "live_url": live})
+        # Single API call: dispatches the task and returns liveUrl for iframe embed.
+        session = await client.sessions.create(task_text, model=model)
+        live = getattr(session, "live_url", None)
+        sid = getattr(session, "id", None)
+        out.append(
+            {
+                "agent_id": aid,
+                "live_url": live,
+                "session_id": str(sid) if sid is not None else None,
+            }
+        )
 
     return {"agents": out}
