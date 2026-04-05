@@ -4,7 +4,7 @@ import { LoadingScreen } from "./LoadingScreen";
 import { ResultsPage } from "./ResultsPage";
 import { generateCampsites } from "@/lib/camping-data";
 import { geocodeLocation } from "@/lib/mapbox";
-import { pollAgentSessionSites } from "@/lib/topo-poll";
+import { pollAgentSessionSites, pollLandRulesSession } from "@/lib/topo-poll";
 import { LOADING_DURATION_MS as LOADING_MS } from "@/lib/loading-duration";
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -21,6 +21,7 @@ export function CampingApp() {
     null,
   ]);
   const [agentApiError, setAgentApiError] = useState(null);
+  const [landRulesText, setLandRulesText] = useState(null);
 
   const handlePreferencesSubmit = useCallback(async (prefs) => {
     const location = prefs.location.trim();
@@ -31,6 +32,7 @@ export function CampingApp() {
     setAppState("loading");
     setAgentLiveUrls([null, null, null]);
     setAgentApiError(null);
+    setLandRulesText(null);
 
     const sessionIds = [null, null, null];
 
@@ -88,13 +90,14 @@ export function CampingApp() {
       try {
         await startBrowserAgents();
         const topoSid = sessionIds[0];
+        const landSid = sessionIds[1];
         const commSid = sessionIds[2];
         const feats = prefsNormalized.features || [];
         const opts = {
           maxWaitMs: LOADING_MS - 1500,
           intervalMs: 2000,
         };
-        const [topoRes, commRes] = await Promise.all([
+        const [topoRes, commRes, landRes] = await Promise.all([
           topoSid
             ? pollAgentSessionSites(
                 API_BASE,
@@ -113,13 +116,21 @@ export function CampingApp() {
                 opts
               )
             : Promise.resolve({ sites: null }),
+          landSid
+            ? pollLandRulesSession(API_BASE, landSid, opts)
+            : Promise.resolve({ text: null }),
         ]);
         return {
           topoSites: topoRes.sites,
           communitySites: commRes.sites,
+          landRulesText: landRes.text,
         };
       } catch {
-        return { topoSites: null, communitySites: null };
+        return {
+          topoSites: null,
+          communitySites: null,
+          landRulesText: null,
+        };
       }
     };
 
@@ -132,6 +143,7 @@ export function CampingApp() {
     const finalCoords = coords ?? [-119.5383, 37.8651];
     const topoSites = agentPoll?.topoSites;
     const communitySites = agentPoll?.communitySites;
+    setLandRulesText(agentPoll?.landRulesText ?? null);
 
     let merged = [];
     let nextId = 1;
@@ -162,6 +174,7 @@ export function CampingApp() {
     setPreferences(null);
     setCampsites([]);
     setAgentApiError(null);
+    setLandRulesText(null);
   }, []);
 
   return (
@@ -179,6 +192,7 @@ export function CampingApp() {
         <ResultsPage
           preferences={preferences}
           campsites={campsites}
+          landRulesText={landRulesText}
           onBack={handleBack}
         />
       )}

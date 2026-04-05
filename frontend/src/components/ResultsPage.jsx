@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { ArrowLeft, Star, Clock, Navigation, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Star,
+  Clock,
+  Navigation,
+  Loader2,
+  ScrollText,
+} from "lucide-react";
 import { MAPBOX_TOKEN, fetchRoute } from "@/lib/mapbox";
 import {
   fetchNearbyFacilities,
@@ -92,7 +99,188 @@ function makePOIEl(color) {
   return el;
 }
 
-export function ResultsPage({ preferences, campsites, onBack }) {
+function stripSimpleMarkdown(s) {
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .trim();
+}
+
+/** Split on http(s) URLs and render links that wrap inside narrow cards. */
+function renderLandRulesTextWithLinks(text) {
+  if (!text) return null;
+  const parts = text.split(/(https?:\/\/[^\s<>"'()[\]]+)/gi);
+  return parts.map((part, i) => {
+    if (!part) return null;
+    if (/^https?:\/\//i.test(part)) {
+      const trimmed = part.replace(/[.,;:!?)]+$/, "");
+      const href = trimmed || part;
+      return (
+        <a
+          key={i}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline font-medium text-emerald-800 underline decoration-emerald-600/35 underline-offset-[3px] [overflow-wrap:anywhere] break-words hover:text-emerald-700 dark:text-emerald-300 dark:decoration-emerald-500/40 dark:hover:text-emerald-200"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+/**
+ * Turn agent plain text into blocks: key/value lines (LABEL: detail) vs prose vs bullets.
+ */
+function parseLandRulesBlocks(raw) {
+  let t = stripSimpleMarkdown(raw);
+  t = t.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "");
+  const lines = t
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const blocks = [];
+  let proseBuf = [];
+
+  const flushProse = () => {
+    if (!proseBuf.length) return;
+    const chunk = proseBuf.join("\n").trim();
+    proseBuf = [];
+    if (!chunk) return;
+    const bulletish = chunk
+      .split(/\n/)
+      .every(
+        (ln) =>
+          /^[-•*]\s/.test(ln) || /^\d+[.)]\s/.test(ln)
+      );
+    if (bulletish) {
+      const items = chunk.split(/\n/).map((ln) =>
+        ln
+          .replace(/^[-•*]\s*/, "")
+          .replace(/^\d+[.)]\s*/, "")
+          .trim()
+      );
+      blocks.push({ type: "list", items });
+    } else {
+      blocks.push({ type: "prose", text: chunk });
+    }
+  };
+
+  const kvPattern = /^([^:\n]{2,88}):\s*(.+)$/;
+  for (const line of lines) {
+    const m = line.match(kvPattern);
+    const label = m?.[1]?.trim();
+    const value = m?.[2]?.trim();
+    const looksLikeLabel =
+      label &&
+      !/^https?:/i.test(value) &&
+      label.length <= 88 &&
+      !label.includes("://") &&
+      (label === label.toUpperCase() ||
+        /^[A-Z]/.test(label) ||
+        /^(land|stay|fire|road|permit|dispersed|current)/i.test(label));
+
+    if (m && looksLikeLabel && value !== undefined) {
+      flushProse();
+      blocks.push({
+        type: "kv",
+        label: stripSimpleMarkdown(label),
+        value: stripSimpleMarkdown(value),
+      });
+    } else {
+      proseBuf.push(line);
+    }
+  }
+  flushProse();
+  return blocks;
+}
+
+/** Renders plain-text policy output from the land_rules Browser Use agent. */
+function LandRulesSection({ text }) {
+  if (!text?.trim()) return null;
+  const blocks = parseLandRulesBlocks(text);
+
+  return (
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-emerald-900/15 bg-gradient-to-b from-emerald-950/[0.07] to-card shadow-sm dark:border-emerald-500/20 dark:from-emerald-950/25">
+      <div className="border-b border-emerald-900/10 bg-emerald-950/[0.06] px-4 py-3 dark:border-emerald-500/15 dark:bg-emerald-950/30">
+        <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600/15 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+            <ScrollText className="h-3.5 w-3.5" aria-hidden />
+          </span>
+          Land rules
+        </h3>
+        <p className="mt-1.5 pl-9 text-[11px] leading-snug text-muted-foreground">
+          Official-style summary from the land rules agent (USFS, BLM, NPS, or state). Verify
+          before you camp.
+        </p>
+      </div>
+
+      <div className="flex min-w-0 flex-col divide-y divide-border/55 p-4 dark:divide-border/40">
+        {blocks.length === 0 ? (
+          <div className="min-w-0 text-sm leading-relaxed text-foreground/90 [overflow-wrap:anywhere] whitespace-pre-wrap break-words">
+            {renderLandRulesTextWithLinks(stripSimpleMarkdown(text.trim()))}
+          </div>
+        ) : (
+          blocks.map((b, i) => {
+            if (b.type === "kv") {
+              return (
+                <section
+                  key={`kv-${i}`}
+                  className="min-w-0 space-y-2 py-4 first:pt-0 last:pb-0"
+                >
+                  <div className="rounded-xl border border-border/80 bg-background/70 px-3.5 py-3 shadow-sm dark:bg-background/45">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800/90 dark:text-emerald-400/90">
+                      {b.label}
+                    </p>
+                    <p className="mt-1.5 min-w-0 text-[13px] leading-relaxed text-foreground/95 [overflow-wrap:anywhere] break-words [text-wrap:pretty]">
+                      {renderLandRulesTextWithLinks(b.value)}
+                    </p>
+                  </div>
+                </section>
+              );
+            }
+            if (b.type === "list") {
+              return (
+                <section
+                  key={`list-${i}`}
+                  className="min-w-0 py-4 first:pt-0 last:pb-0"
+                >
+                  <ul className="space-y-3 border-l-2 border-emerald-600/30 pl-3.5 dark:border-emerald-500/35">
+                    {b.items.map((item, j) => (
+                      <li
+                        key={j}
+                        className="min-w-0 text-[13px] leading-relaxed text-foreground/90 [overflow-wrap:anywhere] break-words [text-wrap:pretty]"
+                      >
+                        <span className="mr-1.5 inline-block h-1 w-1 shrink-0 rounded-full bg-emerald-600/70 align-middle dark:bg-emerald-400/70" />
+                        {renderLandRulesTextWithLinks(item)}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            }
+            return (
+              <section
+                key={`prose-${i}`}
+                className="min-w-0 py-4 first:pt-0 last:pb-0"
+              >
+                <p className="min-w-0 text-[13px] leading-relaxed text-foreground/90 [overflow-wrap:anywhere] whitespace-pre-wrap break-words [text-wrap:pretty]">
+                  {renderLandRulesTextWithLinks(b.text)}
+                </p>
+              </section>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
   const mapContainer  = useRef(null);
   const mapRef        = useRef(null);
   const mapLoadedRef  = useRef(false);
@@ -503,6 +691,11 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                   </div>
                 </button>
               ))}
+              {landRulesText && (
+                <div className="px-0 pt-2 pb-1">
+                  <LandRulesSection text={landRulesText} />
+                </div>
+              )}
             </div>
           )}
 
@@ -524,13 +717,19 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                 <span className="font-medium">{selectedCampsite.price}</span>
               </div>
               {(selectedCampsite.features ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-5">
+                <div className="flex flex-wrap gap-1.5 mb-4">
                   {(selectedCampsite.features ?? []).map((f) => (
                     <span key={f}
                       className="text-xs bg-muted px-2.5 py-1 rounded-full text-foreground">
                       {FEATURE_LABELS[f]}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {landRulesText && (
+                <div className="mb-5">
+                  <LandRulesSection text={landRulesText} />
                 </div>
               )}
 

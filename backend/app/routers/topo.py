@@ -120,3 +120,32 @@ async def get_topo_session_result(
         "sites": sites,
         "as_text": candidates_to_text(candidates),
     }
+
+
+@router.get("/topo/session/{session_id}/land-rules-result")
+async def get_land_rules_session_result(session_id: str) -> dict[str, Any]:
+    """
+    Poll the Browser Use **land_rules** session: when ``output`` is set, return the
+    plain-text policy summary (USFS/BLM/NPS rules — not JSON).
+    """
+    try:
+        client = _get_client()
+        session = await client.sessions.get(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Browser Use session fetch failed: {e}") from e
+
+    status = getattr(session, "status", None)
+    output = getattr(session, "output", None)
+
+    if output is None:
+        return {
+            "ready": False,
+            "session_status": str(status) if status is not None else None,
+        }
+
+    text = str(output).strip()
+    return {
+        "ready": True,
+        "session_status": str(status) if status is not None else None,
+        "text": text,
+    }

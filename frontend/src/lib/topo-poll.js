@@ -37,6 +37,37 @@ export async function pollAgentSessionSites(
   return { sites: null, raw: null };
 }
 
+/**
+ * Poll GET /api/topo/session/:id/land-rules-result until plain-text output is ready or timeout.
+ */
+export async function pollLandRulesSession(apiBase, sessionId, opts = {}) {
+  const intervalMs = opts.intervalMs ?? 2000;
+  const maxWaitMs = opts.maxWaitMs ?? 58_000;
+  const deadline = Date.now() + maxWaitMs;
+  const url = `${apiBase}/api/topo/session/${encodeURIComponent(sessionId)}/land-rules-result`;
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+        continue;
+      }
+      const data = await res.json();
+      if (data.ready && typeof data.text === "string") {
+        const t = data.text.trim();
+        if (t.length > 0) {
+          return { text: t, raw: data };
+        }
+      }
+    } catch {
+      /* network */
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return { text: null, raw: null };
+}
+
 /** @deprecated use pollAgentSessionSites */
 export async function pollTopoSessionSites(
   apiBase,
