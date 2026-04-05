@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { MapPin, TreePine, Compass, Mountain } from "lucide-react";
 import { browserUseIframeSrc } from "@/lib/browser-use-embed";
 
+import tile1 from "@/assets/tile1.gif";
+import tile2 from "@/assets/tile2.gif";
+import tile3 from "@/assets/tile3.gif";
+
 const LOADING_MS = 60_000;
 
 const loadingSteps = [
@@ -11,24 +15,29 @@ const loadingSteps = [
   { icon: Mountain, text: "Preparing recommendations..." },
 ];
 
-function AgentTile({ label, liveUrl }) {
+function AgentTile({ label, liveUrl, children }) {
   const embedSrc = browserUseIframeSrc(liveUrl);
   return (
-    <div className="absolute inset-0 bg-black/20">
-      {embedSrc ? (
+    <div className="absolute inset-0 overflow-hidden">
+      {children ? (
+        <div className="flex h-full items-center justify-center">{children}</div>
+      ) : embedSrc ? (
         <iframe
           title={label}
           src={embedSrc}
-          className="h-full w-full border-0"
+          className="absolute inset-y-0 left-1/2 h-full w-[450%] -translate-x-1/2 border-0"
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           referrerPolicy="no-referrer-when-downgrade"
         />
       ) : (
-        <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground/40">
+        <div
+          className="flex h-full items-center justify-center p-6 text-center text-xs text-white/70"
+          style={{ background: "linear-gradient(to bottom, #8aa5bf, #20232c)" }}
+        >
           {label} stream initializing...
         </div>
       )}
-      <div className="absolute bottom-3 left-3 z-10 rounded-md bg-black/50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white/70 backdrop-blur-sm">
+      <div className="absolute bottom-3 left-3 z-10 rounded-md bg-black/40 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white/80 backdrop-blur-md">
         {label}
       </div>
     </div>
@@ -41,6 +50,33 @@ export function LoadingScreen({
 }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [tiles, setTiles] = useState([
+    { id: 0, label: "Searching for Clearings...", urlIndex: 0 },
+    {
+      id: 1,
+      label: "Scouting the Views...",
+      content: (
+        <img src={tile2} alt="" className="h-full w-full object-cover" />
+      ),
+    },
+    { id: 2, label: "Checking Local Regulations...", urlIndex: 1 },
+    {
+      id: 3,
+      label: "Keeping Your Attention ;)...",
+      content: (
+        <img src={tile1} alt="" className="h-full w-full object-cover" />
+      ),
+    },
+    { id: 4, label: "Consulting Other Campers...", urlIndex: 2 },
+    {
+      id: 5,
+      label: "Analyzing Topography...",
+      content: (
+        <img src={tile3} alt="" className="h-full w-full object-cover" />
+      ),
+    },
+  ]);
 
   useEffect(() => {
     const start = Date.now();
@@ -60,25 +96,50 @@ export function LoadingScreen({
     return () => clearInterval(id);
   }, []);
 
-  /*
-   * md+: anchor from 50vw so cards sit in screen wings with ~8rem gap to center loader.
-   * sm: corner insets; cards are smaller on narrow viewports to reduce overlap.
-   */
+  // Carousel logic: Shift left every 1.8s
+  useEffect(() => {
+    const carouselId = setInterval(() => {
+      setIsTransitioning(true);
+      
+      // Wait for animation duration (800ms) before snapping the array
+      setTimeout(() => {
+        setIsTransitioning(false);
+        setTiles((prev) => [...prev.slice(1), prev[0]]);
+      }, 800);
+    }, 1800);
+
+    return () => clearInterval(carouselId);
+  }, []);
+
   return (
     <section className="fixed inset-0 z-50 overflow-hidden bg-background">
       {/* Agent Tiling Background */}
-      <div className="absolute inset-0 z-0 flex">
-        <div className="relative h-full w-1/2 border-r border-white/10">
-          <AgentTile label="Community Intel" liveUrl={agentLiveUrls[2]} />
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+        <div
+          className={`absolute inset-y-0 flex w-[200%] ${
+            isTransitioning ? "transition-transform duration-800 ease-in-out" : ""
+          }`}
+          style={{
+            left: "-16.666%",
+            transform: isTransitioning ? "translateX(-16.666%)" : "translateX(0)",
+          }}
+        >
+          {tiles.map((tile) => (
+            <div
+              key={tile.id}
+              className="relative h-full w-1/6 border-r border-white/10"
+            >
+              <AgentTile
+                label={tile.label}
+                liveUrl={tile.urlIndex !== undefined ? agentLiveUrls[tile.urlIndex] : null}
+              >
+                {tile.content}
+              </AgentTile>
+            </div>
+          ))}
         </div>
-        <div className="flex h-full w-1/2 flex-col">
-          <div className="relative h-1/2 border-b border-white/10">
-            <AgentTile label="Topo / Map" liveUrl={agentLiveUrls[0]} />
-          </div>
-          <div className="relative h-1/2">
-            <AgentTile label="Land Rules" liveUrl={agentLiveUrls[1]} />
-          </div>
-        </div>
+        {/* Global semi-transparent cover over the entire background */}
+        <div className="absolute inset-0 z-10 bg-white/40" />
       </div>
 
       {/* Logo + attribution — card */}
@@ -95,8 +156,8 @@ export function LoadingScreen({
       </div>
 
       {/* Loader sits below video layer so corners stay visible; narrow column only */}
-      <div className="pointer-events-none relative z-[28] flex min-h-full flex-col items-center justify-center px-6 py-20">
-        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/60 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
+      <div className="pointer-events-none relative z-10 flex min-h-full flex-col items-center justify-center px-6 py-20">
+        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/70 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
           {agentApiError && (
             <p
               role="alert"
