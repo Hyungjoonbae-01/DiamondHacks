@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Search,
   MapPin,
@@ -12,6 +12,15 @@ import {
   ArrowRight,
   PiggyBankIcon,
 } from "lucide-react";
+
+import home1 from "@/assets/home1.jpeg";
+import home2 from "@/assets/home2.jpeg";
+import home3 from "@/assets/home3.jpeg";
+import home4 from "@/assets/home4.jpeg";
+import home5 from "@/assets/home5.jpeg";
+import home6 from "@/assets/home6.jpeg";
+import home7 from "@/assets/home7.jpeg";
+import home8 from "@/assets/home8.jpeg";
 
 const FEATURES = [
   {
@@ -84,6 +93,10 @@ function Toggle({ checked, onChange }) {
   );
 }
 
+const BACKGROUND_IMAGES = [
+  home1, home2, home3, home4, home5, home6, home7, home8
+];
+
 export function PreferencesForm({ onSubmit }) {
   const [location, setLocation] = useState("");
   const [radius, setRadius] = useState(25);
@@ -108,9 +121,36 @@ export function PreferencesForm({ onSubmit }) {
     });
   }
 
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prev) => (prev + 1) % BACKGROUND_IMAGES.length);
+    }, 5000); // Change image every 5 seconds
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-background">
-      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-16">
+    <div className="relative min-h-screen overflow-hidden bg-background">
+      {/* Background Slideshow */}
+      <div className="absolute inset-0 z-0">
+        {BACKGROUND_IMAGES.map((img, idx) => (
+          <div
+            key={idx}
+            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+              idx === currentImageIndex ? "opacity-100" : "opacity-0"
+            }`}
+            style={{
+              backgroundImage: `url(${img})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          />
+        ))}
+        <div className="absolute inset-0 bg-white/40" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="relative z-10 max-w-2xl mx-auto px-6 py-16">
         {/* Header */}
         <div className="mb-10">
           <h1 className="font-display text-4xl md:text-5xl font-normal leading-tight text-foreground mb-3">
