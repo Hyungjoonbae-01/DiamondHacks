@@ -1,3 +1,4 @@
+/** Demo campsites when the topo agent has no parseable JSON/coordinates yet. */
 const CAMPSITE_DATA = [
   { name: "Pine Ridge Campground",  description: "Serene spot nestled among tall pines with a nearby creek and mountain views." },
   { name: "Riverbend Retreat",      description: "Peaceful riverside camping with stunning sunset views and easy water access." },
@@ -27,18 +28,20 @@ export function generateCampsites(coords, preferences) {
       prefs.has(f) ? Math.random() > 0.25 : Math.random() > 0.6
     );
 
+    const lng = coords[0] + Math.cos(angle) * dist;
+    const lat = coords[1] + Math.sin(angle) * dist * 0.75;
+    const coordLine = `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)} (latitude, longitude).`;
+
     return {
       id: i + 1,
       name: data.name,
-      description: data.description,
-      coordinates: [
-        coords[0] + Math.cos(angle) * dist,
-        coords[1] + Math.sin(angle) * dist * 0.75,
-      ],
+      description: `${data.description}\n\n${coordLine}`,
+      coordinates: [lng, lat],
       features,
       rating: parseFloat((3.8 + Math.random() * 1.2).toFixed(1)),
       reviews: Math.floor(20 + Math.random() * 200),
       price: Math.random() > 0.3 ? `$${10 + Math.floor(Math.random() * 30)}/night` : "Free",
+      source: "demo",
     };
   });
 }

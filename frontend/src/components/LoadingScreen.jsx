@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { MapPin, TreePine, Compass, Mountain } from "lucide-react";
 import { browserUseIframeSrc } from "@/lib/browser-use-embed";
-
-const LOADING_MS = 60_000;
+import { LOADING_DURATION_MS as LOADING_MS } from "@/lib/loading-duration";
 
 const loadingSteps = [
   { icon: MapPin, text: "Searching your area..." },
@@ -163,7 +162,7 @@ export function LoadingScreen({
                 />
               </div>
               <p className="mt-4 font-mono text-sm text-muted-foreground">
-                {Math.round(progress)}% complete · ~1 min
+                {Math.round(progress)}% complete · ~2 min 15 sec
               </p>
             </div>
 

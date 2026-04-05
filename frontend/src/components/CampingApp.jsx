@@ -4,8 +4,8 @@ import { LoadingScreen } from "./LoadingScreen";
 import { ResultsPage } from "./ResultsPage";
 import { generateCampsites } from "@/lib/camping-data";
 import { geocodeLocation } from "@/lib/mapbox";
-
-const LOADING_MS = 60_000;
+import { pollAgentSessionSites } from "@/lib/topo-poll";
+import { LOADING_DURATION_MS as LOADING_MS } from "@/lib/loading-duration";
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 /** Must match ``AGENT_IDS`` order in ``backend/app/agents.py``. */
@@ -31,6 +31,8 @@ export function CampingApp() {
     setAppState("loading");
     setAgentLiveUrls([null, null, null]);
     setAgentApiError(null);
+
+    const sessionIds = [null, null, null];
 
     /** Start all Browser Use sessions in parallel so cloud browsers spin up together (no queue behind prior creates). */
     const startBrowserAgents = async () => {
@@ -64,6 +66,7 @@ export function CampingApp() {
             const data = await res.json();
             const row = data.agents?.[0];
             const liveUrl = row?.live_url ?? null;
+            sessionIds[i] = row?.session_id ?? null;
             setAgentLiveUrls((prev) => {
               const next = [...prev];
               next[i] = liveUrl;
@@ -80,14 +83,75 @@ export function CampingApp() {
       }
     };
 
-    const [coords] = await Promise.all([
+    /** Poll topo_map and community_intel sessions in parallel for JSON → map sites. */
+    const pollAgentSessionsForSites = async () => {
+      try {
+        await startBrowserAgents();
+        const topoSid = sessionIds[0];
+        const commSid = sessionIds[2];
+        const feats = prefsNormalized.features || [];
+        const opts = {
+          maxWaitMs: LOADING_MS - 1500,
+          intervalMs: 2000,
+        };
+        const [topoRes, commRes] = await Promise.all([
+          topoSid
+            ? pollAgentSessionSites(
+                API_BASE,
+                topoSid,
+                feats,
+                "topo_agent",
+                opts
+              )
+            : Promise.resolve({ sites: null }),
+          commSid
+            ? pollAgentSessionSites(
+                API_BASE,
+                commSid,
+                feats,
+                "community_intel",
+                opts
+              )
+            : Promise.resolve({ sites: null }),
+        ]);
+        return {
+          topoSites: topoRes.sites,
+          communitySites: commRes.sites,
+        };
+      } catch {
+        return { topoSites: null, communitySites: null };
+      }
+    };
+
+    const [coords, , agentPoll] = await Promise.all([
       geocodeLocation(location).catch(() => null),
       new Promise((r) => setTimeout(r, LOADING_MS)),
-      startBrowserAgents(),
+      pollAgentSessionsForSites(),
     ]);
 
     const finalCoords = coords ?? [-119.5383, 37.8651];
-    const sites = generateCampsites(finalCoords, prefsNormalized);
+    const topoSites = agentPoll?.topoSites;
+    const communitySites = agentPoll?.communitySites;
+
+    let merged = [];
+    let nextId = 1;
+    if (topoSites?.length) {
+      merged.push(
+        ...topoSites.map((s) => ({ ...s, id: nextId++, source: s.source ?? "topo_agent" }))
+      );
+    }
+    if (communitySites?.length) {
+      merged.push(
+        ...communitySites.map((s) => ({
+          ...s,
+          id: nextId++,
+          source: s.source ?? "community_intel",
+        }))
+      );
+    }
+
+    const sites =
+      merged.length > 0 ? merged : generateCampsites(finalCoords, prefsNormalized);
     setCampsites(sites);
     setPreferences((p) => ({ ...p, coordinates: finalCoords }));
     setAppState("results");

@@ -8,6 +8,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+ALL_FEATURE_KEYS = [
+    "near_water",
+    "accessibility",
+    "pet_friendly",
+    "rv_access",
+    "hiking_trails",
+    "fishing_spots",
+    "campfires",
+]
+
 
 class TopoCandidate(BaseModel):
     """Fields aligned with the topo_map agent prompt (name, why, hazards, coords)."""
@@ -91,3 +101,98 @@ class TopoIngestBody(BaseModel):
             '{"candidates":[...]}, one object with name/why/hazards/coords, '
             'or {"raw_output": "<json string>"}'
         )
+
+
+def parse_coords_to_lng_lat(coords: str | None) -> tuple[float, float] | None:
+    """Parse a coords string into Mapbox order ``[lng, lat]`` (two floats)."""
+    if coords is None or not str(coords).strip():
+        return None
+    nums = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", str(coords))]
+    if len(nums) < 2:
+        return None
+    a, b = nums[0], nums[1]
+    # Typical human order is lat,lng (|lat|≤90). Mapbox uses [lng, lat].
+    if abs(a) <= 90 and abs(b) <= 180:
+        return (b, a)
+    if abs(b) <= 90 and abs(a) <= 180:
+        return (a, b)
+    return (b, a)
+
+
+def _extract_json_value(text: str) -> Any:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```\w*\s*", "", text)
+        text = re.sub(r"\s*```\s*$", "", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    for m in re.finditer(r"\{[\s\S]*\}|\[[\s\S]*\]", text):
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("No JSON object or array found in agent output")
+
+
+def parse_topo_agent_output(output: Any) -> list[TopoCandidate]:
+    """Normalize Browser Use ``session.output`` (str or dict) into candidates."""
+    if output is None:
+        return []
+    if isinstance(output, dict):
+        if "candidates" in output and isinstance(output["candidates"], list):
+            return [TopoCandidate.model_validate(c) for c in output["candidates"]]
+        if any(k in output for k in ("name", "why", "hazards", "coords")):
+            return [TopoCandidate.model_validate(output)]
+        return []
+    if isinstance(output, list):
+        return [TopoCandidate.model_validate(c) for c in output]
+    if isinstance(output, str):
+        parsed = _extract_json_value(output)
+        return parse_topo_agent_output(parsed)
+    return []
+
+
+def candidates_to_map_sites(
+    candidates: list[TopoCandidate],
+    *,
+    feature_prefs: list[str] | None = None,
+    site_source: str = "topo_agent",
+) -> list[dict[str, Any]]:
+    """Build ``campsites``-shaped dicts for the React map (coordinates = [lng, lat])."""
+    prefs = set(feature_prefs or [])
+    sites: list[dict[str, Any]] = []
+    label = "Community" if site_source == "community_intel" else "Topo"
+    default_desc = (
+        "Community intel spot."
+        if site_source == "community_intel"
+        else "Topo agent candidate."
+    )
+    for i, c in enumerate(candidates):
+        ll = parse_coords_to_lng_lat(c.coords)
+        if ll is None:
+            continue
+        lng, lat = ll
+        parts = []
+        if c.why:
+            parts.append(c.why.strip())
+        if c.hazards:
+            parts.append(f"Hazards: {c.hazards.strip()}")
+        parts.append(f"Coordinates: {lat:.5f}, {lng:.5f} (latitude, longitude).")
+        desc = "\n\n".join(parts) if parts else default_desc
+        features = [f for f in ALL_FEATURE_KEYS if f in prefs]
+        sites.append(
+            {
+                "id": i + 1,
+                "name": (c.name or f"Site {i + 1}").strip(),
+                "description": desc,
+                "coordinates": [lng, lat],
+                "features": features,
+                "rating": 4.0,
+                "reviews": 0,
+                "price": label,
+                "source": site_source,
+            }
+        )
+    return sites

@@ -81,10 +81,12 @@ def build_task(agent_id: str, briefing: str) -> str:
     tasks = {
         "topo_map": (
             f'Open https://caltopo.com and search for "{loc_q}". Enable the terrain or topo layer immediately. '
-            f"Find 2 dispersed camping candidates within the search area using the map — look for flat benches, "
-            f"spurs off forest roads, and gentle ridges set back from drainages.{pri_str} "
-            f"For each candidate return: NAME/LABEL, WHY THE TERRAIN SUGGESTS IT, VISIBLE HAZARDS, COORDS if shown. "
-            f"Stop after the 2 candidates are listed. Open at most 2 tabs."
+            f"Find exactly 2 dispersed camping candidates within the search area — flat benches, "
+            f"spurs off forest roads, gentle ridges set back from drainages.{pri_str} "
+            f"When done, output ONLY valid JSON (no markdown fences), exactly this shape with two objects in "
+            f'`candidates`: {{"candidates":[{{"name":"string","why":"string","hazards":"string","coords":"lat,lng"}},{{...}}]}}. '
+            f'Each "coords" must be two decimal numbers as a string like "37.8651,-119.5383" (latitude, longitude). '
+            f"Open at most 2 tabs and stop after printing that JSON."
         ),
         "land_rules": (
             f'Search the web for "dispersed camping {loc_q} USFS BLM rules site:fs.usda.gov OR site:blm.gov". '
@@ -94,10 +96,13 @@ def build_task(agent_id: str, briefing: str) -> str:
             f"If jurisdiction is unclear say so. Stop after the official policy summary."
         ),
         "community_intel": (
-            f'Search Reddit for "dispersed camping {loc_q}" and open 1 relevant thread. '
-            f"If Reddit has nothing useful, try Campendium or iOverlander for the same area.{pri_str} "
-            f"Report short bullets: ROAD ACCESS (2WD/4WD, condition), CROWDING, SEASONAL TIPS, WARNINGS. "
-            f"Stop after actionable notes are listed. Open at most 2 tabs."
+            f'Search Reddit, iOverlander, or Campendium for "dispersed camping {loc_q}" or "boondocking {loc_q}". '
+            f"Identify exactly 2 distinct real-world spots or areas travelers discuss (trailheads, roads, or named places).{pri_str} "
+            f'For each, infer approximate coordinates from context (map links, place names near {loc_q}) or use the search area center with a small offset — '
+            f'coords must be decimal latitude,longitude as a string. '
+            f"When done, output ONLY valid JSON (no markdown fences), exactly: "
+            f'`{{"candidates":[{{"name":"string","why":"string","hazards":"string","coords":"lat,lng"}},{{...}}]}}` '
+            f'with two objects. Use "why" for access/crowding/tips; use "hazards" for warnings. Open at most 2 tabs.'
         ),
     }
     return tasks.get(

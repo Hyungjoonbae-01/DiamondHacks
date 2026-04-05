@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { ArrowLeft, Star, Clock, Navigation, Loader2 } from "lucide-react";
-import { MAPBOX_TOKEN, fetchNearbyPOIs, fetchRoute } from "@/lib/mapbox";
+import { MAPBOX_TOKEN, fetchRoute } from "@/lib/mapbox";
+import {
+  fetchNearbyFacilities,
+  facilitiesToPoiMarkers,
+} from "@/lib/facilities";
 
 mapboxgl.accessToken = MAPBOX_TOKEN;
 
@@ -29,23 +33,50 @@ function fmt_dist(metres) {
     : `${(metres / 1000).toFixed(1)} km`;
 }
 
-function makeCampsiteEl(label, selected) {
+function getCampsitePalette(source, selected) {
+  if (source === "community_intel") {
+    return selected
+      ? { background: "#ea580c", color: "#fff", border: "2.5px solid #c2410c" }
+      : { background: "#fff7ed", color: "#9a3412", border: "2.5px solid #fb923c" };
+  }
+  if (source === "topo_agent") {
+    return selected
+      ? { background: "#0f766e", color: "#fff", border: "2.5px solid #115e59" }
+      : { background: "#ecfdf5", color: "#134e4a", border: "2.5px solid #2dd4bf" };
+  }
+  return selected
+    ? { background: "#111", color: "#fff", border: "2.5px solid #111" }
+    : { background: "#fff", color: "#111", border: "2.5px solid #ccc" };
+}
+
+function makeCampsiteEl(label, selected, source = "demo") {
   const el = document.createElement("div");
+  const p = getCampsitePalette(source, selected);
   Object.assign(el.style, {
-    width: "34px", height: "34px",
-    background: selected ? "#111" : "#fff",
-    color: selected ? "#fff" : "#111",
-    border: `2.5px solid ${selected ? "#111" : "#ccc"}`,
+    width: "34px",
+    height: "34px",
+    background: p.background,
+    color: p.color,
+    border: p.border,
     borderRadius: "50%",
     cursor: "pointer",
     boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: "12px", fontWeight: "600",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    fontWeight: "600",
     fontFamily: "system-ui, sans-serif",
     transition: "all 0.2s",
   });
   el.textContent = label;
   return el;
+}
+
+function sourceBadgeLabel(source) {
+  if (source === "topo_agent") return "Topo";
+  if (source === "community_intel") return "Community";
+  return "Demo";
 }
 
 function makePOIEl(color) {
@@ -94,13 +125,14 @@ export function ResultsPage({ preferences, campsites, onBack }) {
   }
 
   function resetCampsiteMarkers(selectedId = null) {
-    markerMapRef.current.forEach(({ el }, id) => {
+    markerMapRef.current.forEach(({ el, source }, id) => {
       const sel = id === selectedId;
+      const p = getCampsitePalette(source ?? "demo", sel);
       Object.assign(el.style, {
-        background: sel ? "#111" : "#fff",
-        color:      sel ? "#fff" : "#111",
-        border:     `2.5px solid ${sel ? "#111" : "#ccc"}`,
-        transform:  sel ? "scale(1.2)" : "scale(1)",
+        background: p.background,
+        color: p.color,
+        border: p.border,
+        transform: sel ? "scale(1.2)" : "scale(1)",
       });
     });
   }
@@ -118,7 +150,10 @@ export function ResultsPage({ preferences, campsites, onBack }) {
 
     setLoadingPOIs(true);
     try {
-      const nearby = await fetchNearbyPOIs(site.coordinates[0], site.coordinates[1]);
+      const lng = site.coordinates[0];
+      const lat = site.coordinates[1];
+      const rawFacilities = await fetchNearbyFacilities(lat, lng);
+      const nearby = facilitiesToPoiMarkers(rawFacilities);
       setPois(nearby);
 
       if (mapLoadedRef.current) {
@@ -355,7 +390,7 @@ export function ResultsPage({ preferences, campsites, onBack }) {
 
       // ── Campsite markers ──────────────────────────────────────────────────
       campsites.forEach((site, i) => {
-        const el = makeCampsiteEl(i + 1, false);
+        const el = makeCampsiteEl(i + 1, false, site.source ?? "demo");
         const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
           .setLngLat(site.coordinates)
           .addTo(map);
@@ -363,7 +398,11 @@ export function ResultsPage({ preferences, campsites, onBack }) {
           e.stopPropagation();
           onSelectCampsiteRef.current?.(site);
         });
-        markerMapRef.current.set(site.id, { marker, el });
+        markerMapRef.current.set(site.id, {
+          marker,
+          el,
+          source: site.source ?? "demo",
+        });
       });
 
       // Fit all markers
@@ -428,7 +467,20 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                       {i + 1}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{site.name}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-foreground truncate">{site.name}</p>
+                        <span
+                          className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0 rounded ${
+                            site.source === "community_intel"
+                              ? "bg-orange-500/15 text-orange-700 dark:text-orange-400"
+                              : site.source === "topo_agent"
+                                ? "bg-teal-500/15 text-teal-800 dark:text-teal-300"
+                                : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {sourceBadgeLabel(site.source)}
+                        </span>
+                      </div>
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{site.description}</p>
                       <div className="flex items-center gap-3 mt-2">
                         <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -437,9 +489,9 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                         </span>
                         <span className="text-xs font-medium text-foreground">{site.price}</span>
                       </div>
-                      {site.features.length > 0 && (
+                      {(site.features ?? []).length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {site.features.slice(0, 3).map((f) => (
+                          {(site.features ?? []).slice(0, 3).map((f) => (
                             <span key={f}
                               className="text-xs bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
                               {FEATURE_LABELS[f]}
@@ -457,6 +509,9 @@ export function ResultsPage({ preferences, campsites, onBack }) {
           {/* ── Selected campsite detail + POIs ── */}
           {selectedCampsite && (
             <div className="p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                {sourceBadgeLabel(selectedCampsite.source)} · map point
+              </p>
               <p className="text-sm text-muted-foreground mb-2">
                 {selectedCampsite.description}
               </p>
@@ -468,9 +523,9 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                 </span>
                 <span className="font-medium">{selectedCampsite.price}</span>
               </div>
-              {selectedCampsite.features.length > 0 && (
+              {(selectedCampsite.features ?? []).length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-5">
-                  {selectedCampsite.features.map((f) => (
+                  {(selectedCampsite.features ?? []).map((f) => (
                     <span key={f}
                       className="text-xs bg-muted px-2.5 py-1 rounded-full text-foreground">
                       {FEATURE_LABELS[f]}
@@ -482,7 +537,7 @@ export function ResultsPage({ preferences, campsites, onBack }) {
               {/* Nearby Facilities */}
               <div className="border-t border-border pt-4">
                 <h3 className="text-xs font-semibold text-foreground uppercase tracking-wide mb-3">
-                  Nearby Facilities
+                  Nearby facilities (closest per category)
                 </h3>
 
                 {loadingPOIs && (
@@ -528,7 +583,10 @@ export function ResultsPage({ preferences, campsites, onBack }) {
                               <p className="text-sm font-medium text-foreground truncate">
                                 {poi.name}
                               </p>
-                              <p className="text-xs text-muted-foreground">{poi.category}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {poi.category}
+                                {poi.distanceLabel ? ` · ${poi.distanceLabel}` : ""}
+                              </p>
 
                               {isActive && (
                                 <div className="flex items-center gap-3 mt-1">
