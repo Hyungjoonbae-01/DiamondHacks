@@ -13,6 +13,7 @@ import {
   PiggyBankIcon,
 } from "lucide-react";
 
+import logo from "@/assets/logo.png";
 import home1 from "@/assets/home1.jpeg";
 import home2 from "@/assets/home2.jpeg";
 import home3 from "@/assets/home3.jpeg";
@@ -150,9 +151,14 @@ export function PreferencesForm({ onSubmit }) {
         <div className="absolute inset-0 bg-black/40" />
       </div>
 
-      <form onSubmit={handleSubmit} className="relative z-10 max-w-2xl mx-auto my-12 md:my-20 bg-white/70 backdrop-blur-md rounded-[2.5rem] px-8 py-12 md:px-16 md:py-16 shadow-2xl border border-white/20">
+      <form onSubmit={handleSubmit} className="relative z-10 max-w-2xl mx-auto my-12 md:my-20 bg-white/80 backdrop-blur-md rounded-[2.5rem] px-8 py-12 md:px-16 md:py-16 shadow-2xl border border-white/20">
         {/* Header */}
         <div className="mb-10">
+          <img
+            src={logo}
+            alt="Logo"
+            className="h-24 w-auto mb-4"
+          />
           <h1 className="font-display text-4xl md:text-5xl font-normal leading-tight text-foreground mb-3">
             Where will your adventure begin?
           </h1>

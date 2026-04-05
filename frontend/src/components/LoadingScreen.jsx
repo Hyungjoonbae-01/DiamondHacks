@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MapPin, TreePine, Compass, Mountain } from "lucide-react";
+import { MapPin, TreePine, Compass, Mountain, LayoutDashboard, X } from "lucide-react";
 import { browserUseIframeSrc } from "@/lib/browser-use-embed";
 
 import tile1 from "@/assets/tile1.gif";
@@ -15,7 +15,7 @@ const loadingSteps = [
   { icon: Mountain, text: "Preparing recommendations..." },
 ];
 
-function AgentTile({ label, liveUrl, children }) {
+function AgentTile({ label, liveUrl, children, aspectFit = false }) {
   const embedSrc = browserUseIframeSrc(liveUrl);
   return (
     <div className="absolute inset-0 overflow-hidden">
@@ -25,7 +25,9 @@ function AgentTile({ label, liveUrl, children }) {
         <iframe
           title={label}
           src={embedSrc}
-          className="absolute inset-y-0 left-1/2 h-full w-[450%] -translate-x-1/2 border-0"
+          className={`absolute inset-y-0 h-full border-0 ${
+            aspectFit ? "inset-x-0 w-full" : "left-1/2 w-[450%] -translate-x-1/2"
+          }`}
           allow="autoplay; fullscreen; clipboard-read; clipboard-write"
           referrerPolicy="no-referrer-when-downgrade"
         />
@@ -49,6 +51,7 @@ export function LoadingScreen({
 }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [showLiveViews, setShowLiveViews] = useState(false);
   const [tiles, setTiles] = useState([
     { id: 0, label: "Searching for Clearings...", urlIndex: 0 },
     {
@@ -133,21 +136,61 @@ export function LoadingScreen({
       </div>
       
       {/* Logo + attribution — card */}
-      <div className="fixed right-4 top-4 z-[36] flex max-w-[min(calc(100vw-2rem),280px)] items-center gap-3 rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md">
-        <img
-          src="/branding-logo.png"
-          alt=""
-          className="h-10 w-auto shrink-0 object-contain"
-        />
-        <p className="text-left text-xs leading-snug text-muted-foreground">
-          Powered by{" "}
-          <span className="font-medium text-foreground">Browser Use</span>
-        </p>
+      <div className="fixed right-4 top-4 z-[36] flex items-center gap-2">
+        <div className="flex max-w-[min(calc(100vw-2rem),280px)] items-center gap-3 rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md">
+          <img
+            src="/branding-logo.png"
+            alt=""
+            className="h-10 w-auto shrink-0 object-contain"
+          />
+          <p className="text-left text-xs leading-snug text-muted-foreground">
+            Powered by{" "}
+            <span className="font-medium text-foreground">Browser Use</span>
+          </p>
+        </div>
+        <button
+          onClick={() => setShowLiveViews(true)}
+          className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/70 bg-card/95 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md transition-all hover:bg-muted active:scale-95"
+          title="Open Live Views"
+        >
+          <LayoutDashboard className="h-5 w-5 text-muted-foreground" />
+        </button>
       </div>
+
+      {/* Live View Overlay */}
+      {showLiveViews && (
+        <div className="fixed bottom-4 right-4 z-[100] flex w-full max-w-[320px] flex-col md:top-25 md:right-4">
+          <div className="relative flex flex-col overflow-hidden rounded-[1.5rem] border border-border/50 bg-card/80 shadow-2xl ring-1 ring-foreground/5 backdrop-blur-xl">
+            <div className="flex items-center justify-between border-b border-border/50 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Live Browser Streams</h3>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Active Research</p>
+              </div>
+              <button
+                onClick={() => setShowLiveViews(false)}
+                className="group flex h-10 w-10 items-center justify-center rounded-full bg-muted/50 transition-colors hover:bg-muted"
+              >
+                <X className="h-5 w-5 text-muted-foreground transition-colors group-hover:text-foreground" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1">
+              <div className="relative aspect-[2/1]">
+                <AgentTile label="Topo / Map" liveUrl={agentLiveUrls[0]} aspectFit />
+              </div>
+              <div className="relative aspect-[2/1]">
+                <AgentTile label="Land Rules" liveUrl={agentLiveUrls[1]} aspectFit />
+              </div>
+              <div className="relative aspect-[2/1]">
+                <AgentTile label="Community Intel" liveUrl={agentLiveUrls[2]} aspectFit />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Loader sits below video layer so corners stay visible; narrow column only */}
       <div className="pointer-events-none relative z-10 flex min-h-full flex-col items-center justify-center px-6 py-20">
-        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/70 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
+        <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/80 px-6 py-8 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md">
           {agentApiError && (
             <p
               role="alert"
