@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { MapPin, TreePine, Compass, Mountain } from "lucide-react";
 import { browserUseIframeSrc } from "@/lib/browser-use-embed";
 
-const LOADING_MS = 60_000;
+/** Progress bar duration hint — research runs 3 agents sequentially and often exceeds 1 min. */
+const LOADING_MS = 240_000;
 
 const loadingSteps = [
   { icon: MapPin, text: "Searching your area..." },
@@ -37,7 +38,7 @@ function AgentVideoCard({ label, liveUrl, className = "" }) {
             />
           ) : (
             <div className="flex h-full min-h-[96px] items-center justify-center px-2 text-center text-[11px] leading-snug text-muted-foreground">
-              Live view when this agent starts…
+              Sequential cloud run — no live embed for this step (saves concurrent sessions).
             </div>
           )}
         </div>
@@ -46,10 +47,7 @@ function AgentVideoCard({ label, liveUrl, className = "" }) {
   );
 }
 
-export function LoadingScreen({
-  agentLiveUrls = [null, null, null],
-  agentApiError = null,
-}) {
+export function LoadingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -76,7 +74,7 @@ export function LoadingScreen({
       {/* Left: live agents — fills full height, shares horizontal space on md+ */}
       <aside className="flex min-h-0 w-full flex-[1.15] flex-col gap-2 border-border bg-muted/15 p-3 sm:gap-3 sm:p-4 md:w-[min(52vw,820px)] md:flex-none md:shrink-0 md:border-r md:py-4">
         <p className="shrink-0 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-          Live agents
+          Three agents (one session at a time)
         </p>
         {/* Grid avoids flex bugs where the middle row collapses with absolute iframes */}
         <div
@@ -85,11 +83,11 @@ export function LoadingScreen({
             gridTemplateRows: "repeat(3, minmax(7rem, 1fr))",
           }}
         >
-          {agentPanels.map((agent, i) => (
+          {agentPanels.map((agent) => (
             <AgentVideoCard
               key={agent.id}
               label={agent.label}
-              liveUrl={agentLiveUrls[i] ?? null}
+              liveUrl={null}
             />
           ))}
         </div>
@@ -113,28 +111,23 @@ export function LoadingScreen({
 
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6 sm:px-8">
           <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/40 bg-background/80 px-5 py-7 text-center shadow-lg ring-1 ring-foreground/[0.04] backdrop-blur-md sm:px-6 sm:py-8">
-            {agentApiError && (
-              <p
-                role="alert"
-                className="mb-6 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-left text-sm text-destructive"
-              >
-                {agentApiError}
-              </p>
-            )}
             <div className="relative mx-auto mb-10 h-24 w-24">
               <div className="absolute inset-0 animate-ping rounded-full bg-foreground/5" />
               <div className="absolute inset-2 animate-pulse rounded-full bg-foreground/10" />
               <div className="absolute inset-0 flex items-center justify-center">
-                {loadingSteps.map(({ icon: Icon }, index) => (
-                  <Icon
-                    key={index}
-                    className={`absolute h-10 w-10 transition-all duration-500 ${
-                      index === currentStep
-                        ? "scale-100 opacity-100"
-                        : "scale-75 opacity-0"
-                    }`}
-                  />
-                ))}
+                {loadingSteps.map((step, index) => {
+                  const StepIcon = step.icon;
+                  return (
+                    <StepIcon
+                      key={index}
+                      className={`absolute h-10 w-10 transition-all duration-500 ${
+                        index === currentStep
+                          ? "scale-100 opacity-100"
+                          : "scale-75 opacity-0"
+                      }`}
+                    />
+                  );
+                })}
               </div>
             </div>
 
@@ -163,7 +156,7 @@ export function LoadingScreen({
                 />
               </div>
               <p className="mt-4 font-mono text-sm text-muted-foreground">
-                {Math.round(progress)}% complete · ~1 min
+                {Math.round(progress)}% · runs as long as the three cloud agents need
               </p>
             </div>
 

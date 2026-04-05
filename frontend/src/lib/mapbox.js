@@ -9,41 +9,32 @@ export async function geocodeLocation(query) {
   return data.features?.[0]?.center ?? null; // [lng, lat]
 }
 
-const POI_QUERIES = [
-  { q: "hospital",       category: "Medical",        color: "#ef4444", emoji: "🏥" },
-  { q: "pharmacy",       category: "Pharmacy",        color: "#3b82f6", emoji: "💊" },
-  { q: "gas station",    category: "Fuel",            color: "#f59e0b", emoji: "⛽" },
-  { q: "grocery store",  category: "Grocery",         color: "#22c55e", emoji: "🛒" },
-  { q: "visitor center", category: "Visitor Center",  color: "#8b5cf6", emoji: "🏛️" },
-];
+/** Forward geocode for autocomplete (addresses, places, regions). */
+export async function fetchAddressSuggestions(
+  query,
+  { limit = 6, signal } = {}
+) {
+  const q = query.trim();
+  if (q.length < 2) return [];
 
-export async function fetchNearbyPOIs(lng, lat) {
-  const results = [];
-  await Promise.all(
-    POI_QUERIES.map(async ({ q, category, color, emoji }) => {
-      try {
-        const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
-            `?proximity=${lng},${lat}&types=poi&limit=2&access_token=${MAPBOX_TOKEN}`
-        );
-        const data = await res.json();
-        data.features?.slice(0, 2).forEach((f) => {
-          results.push({
-            id: f.id,
-            name: f.text,
-            category,
-            color,
-            emoji,
-            coordinates: f.center,
-            address: f.place_name,
-          });
-        });
-      } catch {
-        // ignore individual failures
-      }
-    })
+  const params = new URLSearchParams({
+    access_token: MAPBOX_TOKEN,
+    autocomplete: "true",
+    limit: String(limit),
+    types: "country,region,district,place,locality,neighborhood,address,poi",
+  });
+
+  const res = await fetch(
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?${params}`,
+    { signal }
   );
-  return results;
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.features ?? []).map((f) => ({
+    id: f.id,
+    placeName: f.place_name,
+    coordinates: f.center,
+  }));
 }
 
 export async function fetchRoute(fromCoords, toCoords) {

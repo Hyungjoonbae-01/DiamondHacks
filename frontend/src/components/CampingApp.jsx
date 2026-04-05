@@ -2,25 +2,58 @@ import { useState, useCallback } from "react";
 import { PreferencesForm } from "./PreferencesForm";
 import { LoadingScreen } from "./LoadingScreen";
 import { ResultsPage } from "./ResultsPage";
-import { generateCampsites } from "@/lib/camping-data";
+import { enrichCampsitesWithSkyLight } from "@/lib/camping-data";
 import { geocodeLocation } from "@/lib/mapbox";
 
-const LOADING_MS = 60_000;
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-/** Must match ``AGENT_IDS`` order in ``backend/app/agents.py``. */
-const AGENT_IDS_ORDER = ["topo_map", "land_rules", "community_intel"];
+async function fetchResearchCampsites(prefs) {
+  try {
+    const res = await fetch(`${API_BASE}/api/research/campsites`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: prefs.location.trim(),
+        radius: prefs.radius,
+        features: prefs.features,
+      }),
+    });
+    if (!res.ok) {
+      let message = `Research could not complete (HTTP ${res.status}).`;
+      try {
+        const errBody = await res.json();
+        const d = errBody?.detail;
+        if (typeof d === "string") message = d;
+        else if (Array.isArray(d))
+          message = d.map((x) => x?.msg ?? JSON.stringify(x)).join(" ");
+      } catch {
+        /* ignore */
+      }
+      return {
+        ok: false,
+        error: message,
+        campsites: [],
+        reports: null,
+        parse_note: null,
+      };
+    }
+    return { ok: true, ...(await res.json()) };
+  } catch {
+    return {
+      ok: false,
+      error: `Could not reach the API at ${API_BASE}. Is the backend running?`,
+      campsites: [],
+      reports: null,
+      parse_note: null,
+    };
+  }
+}
 
 export function CampingApp() {
   const [appState, setAppState] = useState("preferences");
   const [preferences, setPreferences] = useState(null);
   const [campsites, setCampsites] = useState([]);
-  const [agentLiveUrls, setAgentLiveUrls] = useState([
-    null,
-    null,
-    null,
-  ]);
-  const [agentApiError, setAgentApiError] = useState(null);
+  const [researchMeta, setResearchMeta] = useState(null);
 
   const handlePreferencesSubmit = useCallback(async (prefs) => {
     const location = prefs.location.trim();
@@ -29,66 +62,52 @@ export function CampingApp() {
     const prefsNormalized = { ...prefs, location };
     setPreferences(prefsNormalized);
     setAppState("loading");
-    setAgentLiveUrls([null, null, null]);
-    setAgentApiError(null);
+    setResearchMeta(null);
 
-    /** Start all Browser Use sessions in parallel so cloud browsers spin up together (no queue behind prior creates). */
-    const startBrowserAgents = async () => {
-      const bodyBase = {
-        location,
-        radius: prefs.radius,
-        features: prefs.features,
-      };
-      try {
-        await Promise.all(
-          AGENT_IDS_ORDER.map(async (agent_id, i) => {
-            const res = await fetch(`${API_BASE}/api/browser-agents/start-live`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...bodyBase, agent_id }),
-            });
-            if (!res.ok) {
-              let message = `Agent ${agent_id} could not start (HTTP ${res.status}).`;
-              try {
-                const errBody = await res.json();
-                const d = errBody?.detail;
-                if (typeof d === "string") message = d;
-                else if (Array.isArray(d))
-                  message = d.map((x) => x?.msg ?? JSON.stringify(x)).join(" ");
-              } catch {
-                /* ignore */
-              }
-              setAgentApiError(message);
-              throw new Error(message);
-            }
-            const data = await res.json();
-            const row = data.agents?.[0];
-            const liveUrl = row?.live_url ?? null;
-            setAgentLiveUrls((prev) => {
-              const next = [...prev];
-              next[i] = liveUrl;
-              return next;
-            });
-          })
-        );
-      } catch (e) {
-        if (!(e instanceof Error) || !String(e.message).includes("could not start")) {
-          setAgentApiError(
-            `Could not reach the API at ${API_BASE}. Is the backend running?`
-          );
-        }
-      }
-    };
-
-    const [coords] = await Promise.all([
-      geocodeLocation(location).catch(() => null),
-      new Promise((r) => setTimeout(r, LOADING_MS)),
-      startBrowserAgents(),
+    /**
+     * Single Browser Use pipeline: POST /api/research/campsites runs topo_map → land_rules
+     * → community_intel sequentially (three sessions total). Do not also call start-live,
+     * or you exceed concurrent session limits (3 live + research = 429).
+     */
+    const [coords, research] = await Promise.all([
+      prefsNormalized.coordinates
+        ? Promise.resolve(prefsNormalized.coordinates)
+        : geocodeLocation(location).catch(() => null),
+      fetchResearchCampsites(prefsNormalized),
     ]);
 
     const finalCoords = coords ?? [-119.5383, 37.8651];
-    const sites = generateCampsites(finalCoords, prefsNormalized);
+
+    const rawList = Array.isArray(research.campsites) ? research.campsites : [];
+    const normalized = rawList
+      .filter(
+        (c) =>
+          Array.isArray(c.coordinates) &&
+          c.coordinates.length === 2 &&
+          Number.isFinite(c.coordinates[0]) &&
+          Number.isFinite(c.coordinates[1])
+      )
+      .map((c, i) => ({
+        id: c.id ?? i + 1,
+        name: c.name || `Site ${i + 1}`,
+        description: c.description || "",
+        website: c.website ?? null,
+        coordinates: c.coordinates,
+        features: Array.isArray(c.features) ? c.features : [],
+        rating: c.rating ?? null,
+        reviews: c.reviews ?? null,
+        price: c.price ?? null,
+        hazards: c.hazards ?? null,
+        confidence: c.confidence ?? null,
+      }));
+
+    const sites = enrichCampsitesWithSkyLight(normalized);
     setCampsites(sites);
+    setResearchMeta({
+      reports: research.reports,
+      parse_note: research.parse_note,
+      researchError: research.ok ? null : research.error,
+    });
     setPreferences((p) => ({ ...p, coordinates: finalCoords }));
     setAppState("results");
   }, []);
@@ -97,7 +116,7 @@ export function CampingApp() {
     setAppState("preferences");
     setPreferences(null);
     setCampsites([]);
-    setAgentApiError(null);
+    setResearchMeta(null);
   }, []);
 
   return (
@@ -106,15 +125,13 @@ export function CampingApp() {
         <PreferencesForm onSubmit={handlePreferencesSubmit} />
       )}
       {appState === "loading" && (
-        <LoadingScreen
-          agentLiveUrls={agentLiveUrls}
-          agentApiError={agentApiError}
-        />
+        <LoadingScreen />
       )}
       {appState === "results" && preferences && (
         <ResultsPage
           preferences={preferences}
           campsites={campsites}
+          researchMeta={researchMeta}
           onBack={handleBack}
         />
       )}

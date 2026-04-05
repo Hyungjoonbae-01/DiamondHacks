@@ -3,6 +3,11 @@
 Official flow: POST /sessions with ``task`` so ``liveUrl`` matches the session that
 runs the task (see Browser Use live preview docs). Do not create an empty session
 then call ``run`` separately—that can leave the iframe on the wrong session.
+
+The web UI uses ``POST /api/research/campsites`` (sequential ``client.run``) for
+map data instead of this route, so Browser Use only opens **three sessions per
+search**, one at a time. Calling ``start-live`` in parallel with research will
+duplicate sessions and can trigger 429 concurrent-session limits.
 """
 
 from __future__ import annotations

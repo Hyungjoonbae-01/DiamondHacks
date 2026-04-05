@@ -1,7 +1,10 @@
 """Three Browser Use agents for dispersed camping research in a given area.
 
-Agents run **one at a time** (await each run before starting the next). Auth:
-``BROWSER_USE_API_KEY`` (``bu_...``). See: https://docs.browser-use.com/cloud/llms.txt
+Tasks run **sequentially** on a **single v3 cloud session** (reuse ``session_id`` between
+runs) so the dashboard shows one browser session for the whole research pass—not three
+separate sessions that can linger and stack as “active” (especially after timeouts).
+
+Auth: ``BROWSER_USE_API_KEY`` (``bu_...``). See: https://docs.browser-use.com/cloud/llms.txt
 """
 
 from __future__ import annotations
@@ -13,7 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.env_loader import load_env
-from browser_use_sdk import AsyncBrowserUse
+from browser_use_sdk.v3 import AsyncBrowserUse
+
 load_env()
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -144,27 +148,41 @@ async def _run_one_agent(
     client: AsyncBrowserUse,
     agent_id: str,
     briefing: str,
+    *,
+    session_id: str | None,
+    keep_alive: bool,
 ) -> AgentRunResult:
+    """Run one task on an existing v3 session (or create the session on first call)."""
     task = build_task(agent_id, briefing)
-    run_kw: dict = {}
-    if model := os.getenv("BROWSER_USE_MODEL", "").strip():
+    model = os.getenv("BROWSER_USE_MODEL", "").strip() or None
+    run_kw: dict = {
+        "session_id": session_id,
+        "keep_alive": keep_alive,
+        "timeout": session_timeout_minutes_for_api(),
+    }
+    if model:
         run_kw["model"] = model
+    handle = client.run(task, **run_kw)
     try:
-        result = await asyncio.wait_for(
-            client.run(task, **run_kw),
-            timeout=_RUN_TIMEOUT_S,
-        )
+        result = await asyncio.wait_for(handle, timeout=_RUN_TIMEOUT_S)
         sess = result.session
         sid = getattr(sess, "id", None)
         out = result.output if result and getattr(result, "output", None) else ""
+        out_text = out if isinstance(out, str) else ("" if out is None else str(out))
         return AgentRunResult(
             agent_id=agent_id,
-            output=out or "",
+            output=out_text,
             session_id=str(sid) if sid is not None else None,
             live_url=getattr(sess, "live_url", None),
             status="complete",
         )
     except asyncio.TimeoutError:
+        sid_stop = getattr(handle, "session_id", None)
+        if sid_stop:
+            try:
+                await client.sessions.stop(sid_stop)
+            except Exception:
+                pass
         return AgentRunResult(
             agent_id=agent_id,
             output="Partial results returned after reaching the time limit.",
@@ -173,6 +191,12 @@ async def _run_one_agent(
             status="partial",
         )
     except Exception as e:
+        sid_stop = getattr(handle, "session_id", None)
+        if sid_stop:
+            try:
+                await client.sessions.stop(sid_stop)
+            except Exception:
+                pass
         return AgentRunResult(
             agent_id=agent_id,
             output="",
@@ -285,7 +309,7 @@ async def run_three_concurrent(
     *,
     radius_miles: int = 25,
     features: list[str] | None = None,) -> list[AgentRunResult]:
-    """Run topo_map, land_rules, then community_intel — one agent at a time."""
+    """Run topo_map → land_rules → community_intel on one reused v3 session (three tasks)."""
     load_env()
     api_key = os.getenv("BROWSER_USE_API_KEY", "").strip()
     if not api_key:
@@ -295,28 +319,54 @@ async def run_three_concurrent(
     briefing = build_camper_briefing(location, radius_miles, feats)
     client = AsyncBrowserUse(api_key=api_key, timeout=_HTTP_TIMEOUT_S)
     results: list[AgentRunResult] = []
+    shared_session_id: str | None = None
 
-    for i, aid in enumerate(AGENT_IDS):
-        if i > 0 and _AGENT_STAGGER_S > 0:
-            await asyncio.sleep(_AGENT_STAGGER_S)
+    try:
+        for i, aid in enumerate(AGENT_IDS):
+            if i > 0 and _AGENT_STAGGER_S > 0:
+                await asyncio.sleep(_AGENT_STAGGER_S)
 
-        result = await _run_one_agent(client, aid, briefing)
+            is_last = i == len(AGENT_IDS) - 1
+            keep_alive = not is_last
 
-        if aid == "topo_map" and result.output:
-            raw_topo = result.output
-            gemini_topo = run_gemini_topo_analysis(raw_topo)
-            result.output = (
-                "RAW TOPO AGENT OUTPUT\n"
-                + "=" * 60
-                + "\n"
-                + raw_topo.strip()
-                + "\n\n"
-                + "GEMINI TOPO ANALYSIS\n"
-                + "=" * 60
-                + "\n"
-                + gemini_topo.strip()
+            result = await _run_one_agent(
+                client,
+                aid,
+                briefing,
+                session_id=shared_session_id,
+                keep_alive=keep_alive,
             )
 
-        results.append(result)
+            if result.session_id:
+                shared_session_id = result.session_id
+            else:
+                shared_session_id = None
+
+            if aid == "topo_map" and result.output:
+                raw_topo = result.output
+                gemini_topo = run_gemini_topo_analysis(raw_topo)
+                result.output = (
+                    "RAW TOPO AGENT OUTPUT\n"
+                    + "=" * 60
+                    + "\n"
+                    + raw_topo.strip()
+                    + "\n\n"
+                    + "GEMINI TOPO ANALYSIS\n"
+                    + "=" * 60
+                    + "\n"
+                    + gemini_topo.strip()
+                )
+
+            results.append(result)
+    finally:
+        if shared_session_id:
+            try:
+                await client.sessions.stop(shared_session_id)
+            except Exception:
+                pass
+        try:
+            await client.close()
+        except Exception:
+            pass
 
     return results
