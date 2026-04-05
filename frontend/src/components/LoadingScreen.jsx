@@ -32,8 +32,7 @@ function AgentTile({ label, liveUrl, children }) {
       ) : (
         <div
           className="flex h-full items-center justify-center p-6 text-center text-xs text-white/70"
-          style={{ background: "linear-gradient(to bottom, #8aa5bf, #20232c)" }}
-        >
+          style={{ background: "linear-gradient(to bottom, #8aa5bf, #20232c)" }}>
           {label} stream initializing...
         </div>
       )}
@@ -50,7 +49,6 @@ export function LoadingScreen({
 }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [tiles, setTiles] = useState([
     { id: 0, label: "Searching for Clearings...", urlIndex: 0 },
     {
@@ -96,38 +94,30 @@ export function LoadingScreen({
     return () => clearInterval(id);
   }, []);
 
-  // Carousel logic: Shift left every 1.8s
-  useEffect(() => {
-    const carouselId = setInterval(() => {
-      setIsTransitioning(true);
-      
-      // Wait for animation duration (800ms) before snapping the array
-      setTimeout(() => {
-        setIsTransitioning(false);
-        setTiles((prev) => [...prev.slice(1), prev[0]]);
-      }, 800);
-    }, 1800);
-
-    return () => clearInterval(carouselId);
-  }, []);
-
   return (
     <section className="fixed inset-0 z-50 overflow-hidden bg-background">
+      <style>
+        {`
+          @keyframes continuous-linear-scroll {
+            from { transform: translateX(0); }
+            to { transform: translateX(-50%); }
+          }
+        `}
+      </style>
+
       {/* Agent Tiling Background */}
       <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
         <div
-          className={`absolute inset-y-0 flex w-[200%] ${
-            isTransitioning ? "transition-transform duration-800 ease-in-out" : ""
-          }`}
+          className="absolute inset-y-0 flex w-[400%]"
           style={{
             left: "-16.666%",
-            transform: isTransitioning ? "translateX(-16.666%)" : "translateX(0)",
+            animation: "continuous-linear-scroll 21.6s linear infinite",
           }}
         >
-          {tiles.map((tile) => (
+          {[...tiles, ...tiles].map((tile, idx) => (
             <div
-              key={tile.id}
-              className="relative h-full w-1/6 border-r border-white/10"
+              key={`${tile.id}-${idx}`}
+              className="relative h-full w-[8.3333%] border-r border-white/10"
             >
               <AgentTile
                 label={tile.label}
@@ -139,9 +129,9 @@ export function LoadingScreen({
           ))}
         </div>
         {/* Global semi-transparent cover over the entire background */}
-        <div className="absolute inset-0 z-10 bg-white/40" />
+        <div className="absolute inset-0 z-10 bg-black/40" />
       </div>
-
+      
       {/* Logo + attribution — card */}
       <div className="fixed right-4 top-4 z-[36] flex max-w-[min(calc(100vw-2rem),280px)] items-center gap-3 rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-xl ring-1 ring-foreground/[0.06] backdrop-blur-md">
         <img

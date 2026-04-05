@@ -147,10 +147,10 @@ export function PreferencesForm({ onSubmit }) {
             }}
           />
         ))}
-        <div className="absolute inset-0 bg-white/40" />
+        <div className="absolute inset-0 bg-black/40" />
       </div>
 
-      <form onSubmit={handleSubmit} className="relative z-10 max-w-2xl mx-auto px-6 py-16">
+      <form onSubmit={handleSubmit} className="relative z-10 max-w-2xl mx-auto my-12 md:my-20 bg-white/70 backdrop-blur-md rounded-[2.5rem] px-8 py-12 md:px-16 md:py-16 shadow-2xl border border-white/20">
         {/* Header */}
         <div className="mb-10">
           <h1 className="font-display text-4xl md:text-5xl font-normal leading-tight text-foreground mb-3">
