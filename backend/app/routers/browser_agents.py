@@ -14,14 +14,22 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents import AGENT_IDS, build_camper_briefing, build_task
+from app.agents import (
+    AGENT_IDS,
+    build_camper_briefing,
+    build_task,
+    session_timeout_minutes_for_api,
+)
 
 router = APIRouter(tags=["browser-agents"])
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Seconds to wait between starting each agent (one session create at a time).
-_AGENT_STAGGER_S = float(os.getenv("BROWSER_USE_AGENT_STAGGER_S", "2"))
+_AGENT_STAGGER_S = float(os.getenv("BROWSER_USE_AGENT_STAGGER_S", "0.35"))
+
+# ``sessions.create`` can take a long time while the cloud browser spins up; SDK default is 30s.
+_HTTP_TIMEOUT_S = float(os.getenv("BROWSER_USE_HTTP_TIMEOUT", "180"))
 
 _client = None
 
@@ -37,7 +45,7 @@ def _get_client():
             detail="BROWSER_USE_API_KEY not configured",
         )
     if _client is None:
-        _client = AsyncBrowserUse(api_key=api_key)
+        _client = AsyncBrowserUse(api_key=api_key, timeout=_HTTP_TIMEOUT_S)
     return _client
 
 
@@ -56,7 +64,7 @@ async def start_live(body: StartLiveBody):
 
     Pass ``agent_id`` (one of ``topo_map``, ``land_rules``, ``community_intel``) to start
     a single agent. Omit it to start all three in one call, staggered by
-    ``BROWSER_USE_AGENT_STAGGER_S`` seconds between each.
+    ``BROWSER_USE_AGENT_STAGGER_S`` seconds between each (default 0.35s).
     """
     loc = body.location.strip()
     if not loc:
@@ -83,7 +91,12 @@ async def start_live(body: StartLiveBody):
             await asyncio.sleep(_AGENT_STAGGER_S)
         task_text = build_task(aid, briefing)
         # Single API call: dispatches the task and returns liveUrl for iframe embed.
-        session = await client.sessions.create(task_text, model=model)
+        # ``timeout`` is session wall-clock in minutes (API minimum 1; see session_timeout_minutes_for_api).
+        session = await client.sessions.create(
+            task_text,
+            model=model,
+            **{"timeout": session_timeout_minutes_for_api()},
+        )
         live = getattr(session, "live_url", None)
         sid = getattr(session, "id", None)
         out.append(

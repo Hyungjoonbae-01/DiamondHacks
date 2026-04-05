@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.env_loader import load_env
-from browser_use_sdk.v2 import AsyncBrowserUse
-
+from browser_use_sdk import AsyncBrowserUse
 load_env()
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -21,8 +21,16 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 # topo_map: terrain / map-only spot finding; land_rules: agency rules; community_intel: trip reports & forums
 AGENT_IDS: tuple[str, ...] = ("topo_map", "land_rules", "community_intel")
 
-_RUN_TIMEOUT_S = float(os.getenv("BROWSER_USE_RUN_TIMEOUT", "140"))
-_AGENT_STAGGER_S = float(os.getenv("BROWSER_USE_AGENT_STAGGER_S", "2"))
+# Wall-clock cap for each agent (live sessions + asyncio.wait_for around client.run).
+_AGENT_MAX_SECONDS = float(os.getenv("BROWSER_USE_AGENT_MAX_SECONDS", "60"))
+_RUN_TIMEOUT_S = float(os.getenv("BROWSER_USE_RUN_TIMEOUT", str(_AGENT_MAX_SECONDS)))
+_AGENT_STAGGER_S = float(os.getenv("BROWSER_USE_AGENT_STAGGER_S", "0.35"))
+_HTTP_TIMEOUT_S = float(os.getenv("BROWSER_USE_HTTP_TIMEOUT", "360"))
+
+
+def session_timeout_minutes_for_api() -> int:
+    """Browser Use v3 ``POST /sessions`` uses ``timeout`` in whole minutes (minimum 1)."""
+    return max(1, int((_AGENT_MAX_SECONDS + 59) // 60))
 
 _FEATURE_LABELS: dict[str, str] = {
     "near_water": "near water (rivers, lakes, streams)",
@@ -53,49 +61,48 @@ def build_camper_briefing(location: str, radius_miles: int, features: list[str])
     return "\n".join(lines)
 
 
+def _location_anchor(briefing: str) -> str:
+    m = re.search(r'Location anchor:\s*"([^"]*)"', briefing)
+    return (m.group(1).strip() if m else "") or ""
+
+
+def _feature_summary(briefing: str) -> str:
+    """Extract the user priorities line for short context blocks."""
+    m = re.search(r"User priorities:\s*(.+)", briefing)
+    return m.group(1).strip() if m else ""
+
+
 def build_task(agent_id: str, briefing: str) -> str:
-    b = briefing.strip()
-    header = (
-        "The user is searching for dispersed / primitive camping. "
-        "Use ALL of the following as their search criteria (location, radius, and preferences):\n"
-        f"{b}\n\n"
-    )
+    loc = _location_anchor(briefing)
+    loc_q = loc if loc else "the user's search area"
+    priorities = _feature_summary(briefing)
+    pri_str = f" Prioritize: {priorities}." if priorities else ""
+
     tasks = {
         "topo_map": (
-            header
-            + "Research DISPERSED PRIMITIVE CAMPING matching that request. "
-            "Work primarily from TOPOGRAPHIC / TERRAIN MAPS in the browser (e.g. CalTopo public map, USGS National Map, "
-            "or Google Maps / Google Earth with terrain or satellite + contour-style layers if available). "
-            "Use the map to spot candidate areas yourself—do not only read blog lists. "
-            "Look for: gentle flat benches, small spurs off forest roads (where contours widen), ridges or saddles with mild slope, "
-            "and sites set back from obvious stream channels or cliff bands. "
-            "Weight locations inside the user's search radius and aligned with their stated priorities when possible. "
-            "Return at least 3 MAP-DERIVED CANDIDATES, each with: LABEL (landmark/road/quad name), WHY TOPO/SATELLITE SUGGESTS IT, "
-            "HAZARDS visible on map (avalanche terrain, floodplain, cliff, very steep pitch), and COORDS or grid ref ONLY if the map UI shows them. "
-            "Open at most 2 map tabs total. Stop when this structured list is complete."
+            f'Open https://caltopo.com and search for "{loc_q}". Enable the terrain or topo layer immediately. '
+            f"Find 2 dispersed camping candidates within the search area using the map — look for flat benches, "
+            f"spurs off forest roads, and gentle ridges set back from drainages.{pri_str} "
+            f"For each candidate return: NAME/LABEL, WHY THE TERRAIN SUGGESTS IT, VISIBLE HAZARDS, COORDS if shown. "
+            f"Stop after the 2 candidates are listed. Open at most 2 tabs."
         ),
         "land_rules": (
-            header
-            + "Research RULES for LEGAL DISPERSED CAMPING for this same user request and geographic scope. "
-            "Prefer official sources: USFS, BLM, NPS, state parks/forests, tribal land notices if relevant. "
-            "Answer plainly: LAND MANAGER(S), DISPERSED ALLOWED OR NOT, typical STAY LIMIT (days), ROAD/SITE setbacks if stated, "
-            "PERMITS or passes, seasonal FIRE or STAGE restrictions (especially if the user cares about campfires), and any CURRENT CLOSURES. "
-            "If jurisdiction is unclear, say so. Stop after official-policy summary—no forum opinions as law."
+            f'Search the web for "dispersed camping {loc_q} USFS BLM rules site:fs.usda.gov OR site:blm.gov". '
+            f"Open the most official result (USFS, BLM, NPS, or state agency).{pri_str} "
+            f"Report plainly: LAND MANAGER, DISPERSED CAMPING ALLOWED (yes/no/limited), STAY LIMIT (days), "
+            f"ROAD/SITE SETBACKS, PERMITS OR PASSES REQUIRED, FIRE RESTRICTIONS, CURRENT CLOSURES. "
+            f"If jurisdiction is unclear say so. Stop after the official policy summary."
         ),
         "community_intel": (
-            header
-            + "Find PRACTICAL dispersed / boondocking intel matching this user request from travelers. "
-            "Use Reddit (e.g. r/overlanding, r/camping, or regional subs as fits), iOverlander, Campendium free sites, "
-            "or similar—open at most 2 threads or listings. "
-            "Return short bullets: ACCESS (2WD/4WD, road condition hints), CROWDING, WATER/BUGS/seasonal tips if mentioned, "
-            "and WARNINGS (noise, trash, enforcement). Relate findings to the user's radius and priorities when possible. "
-            "Stop once you have actionable notes. Scroll down pages for visual effect while you gather info"
+            f'Search Reddit for "dispersed camping {loc_q}" and open 1 relevant thread. '
+            f"If Reddit has nothing useful, try Campendium or iOverlander for the same area.{pri_str} "
+            f"Report short bullets: ROAD ACCESS (2WD/4WD, condition), CROWDING, SEASONAL TIPS, WARNINGS. "
+            f"Stop after actionable notes are listed. Open at most 2 tabs."
         ),
     }
     return tasks.get(
         agent_id,
-        header
-        + "Research dispersed camping options and regulations for this request. Return a concise plain-text summary.",
+        f'Research dispersed camping near "{loc_q}". {briefing[:300]} Return a concise plain-text summary.',
     )
 
 
@@ -181,13 +188,103 @@ def _missing_key_results() -> list[AgentRunResult]:
         for aid in AGENT_IDS
     ]
 
+def build_gemini_topo_prompt(topo_output: str) -> str:
+    return f"""
+    You are an outdoor terrain analyst evaluating dispersed camping locations using topographic map observations.
+
+    You are given raw candidate locations extracted from a map. Each includes:
+    - Label
+    - Coordinates
+    - Raw map observations
+    - Visible hazards
+
+    Your job is to evaluate, clean, and rank these candidates.
+
+    STRICT RULES:
+    - Do NOT invent new locations or coordinates
+    - Only use the information provided
+    - If a candidate is missing coordinates, discard it
+    - Be cautious: map interpretation is uncertain
+    - Prefer safety and accessibility over optimism
+
+    TASKS:
+    1. For each candidate:
+    - Explain why the terrain MAY be suitable for dispersed camping
+    - Identify risks or hazards
+    - Assign a confidence level: LOW / MEDIUM / HIGH
+
+    2. Rank the candidates from best to worst based on:
+    - Flatness
+    - Distance from hazards
+    - Likelihood of vehicle access
+
+    FORMAT:
+
+    FINAL RANKED CANDIDATES
+
+    1. LABEL:
+    COORDINATES:
+    WHY IT LOOKS PROMISING:
+    RISKS:
+    CONFIDENCE:
+
+    2. LABEL:
+    COORDINATES:
+    WHY IT LOOKS PROMISING:
+    RISKS:
+    CONFIDENCE:
+
+    3. LABEL:
+    COORDINATES:
+    WHY IT LOOKS PROMISING:
+    RISKS:
+    CONFIDENCE:
+
+    SUMMARY:
+    - Best overall option:
+    - Why:
+    - What should be verified on arrival:
+
+    RAW TOPO AGENT OUTPUT:
+    {topo_output}
+    """.strip()
+
+
+def run_gemini_topo_analysis(topo_output: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return topo_output + "\n\n[Gemini analysis skipped: GEMINI_API_KEY is not set]"
+
+    try:
+        from google import genai
+    except ModuleNotFoundError:
+        return (
+            topo_output
+            + "\n\n[Gemini analysis skipped: install google-genai (pip install google-genai)]"
+        )
+
+    try:
+        gemini_client = genai.Client(api_key=api_key)
+        prompt = build_gemini_topo_prompt(topo_output)
+
+        response = gemini_client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt,
+        )
+
+        text = getattr(response, "text", None)
+        if text and text.strip():
+            return text.strip()
+
+        return topo_output + "\n\n[Gemini analysis failed: empty response]"
+    except Exception as e:
+        return topo_output + f"\n\n[Gemini analysis failed: {e}]"
 
 async def run_three_concurrent(
     location: str,
     *,
     radius_miles: int = 25,
-    features: list[str] | None = None,
-) -> list[AgentRunResult]:
+    features: list[str] | None = None,) -> list[AgentRunResult]:
     """Run topo_map, land_rules, then community_intel — one agent at a time."""
     load_env()
     api_key = os.getenv("BROWSER_USE_API_KEY", "").strip()
@@ -196,10 +293,30 @@ async def run_three_concurrent(
 
     feats = features or []
     briefing = build_camper_briefing(location, radius_miles, feats)
-    client = AsyncBrowserUse(api_key=api_key)
+    client = AsyncBrowserUse(api_key=api_key, timeout=_HTTP_TIMEOUT_S)
     results: list[AgentRunResult] = []
+
     for i, aid in enumerate(AGENT_IDS):
         if i > 0 and _AGENT_STAGGER_S > 0:
             await asyncio.sleep(_AGENT_STAGGER_S)
-        results.append(await _run_one_agent(client, aid, briefing))
+
+        result = await _run_one_agent(client, aid, briefing)
+
+        if aid == "topo_map" and result.output:
+            raw_topo = result.output
+            gemini_topo = run_gemini_topo_analysis(raw_topo)
+            result.output = (
+                "RAW TOPO AGENT OUTPUT\n"
+                + "=" * 60
+                + "\n"
+                + raw_topo.strip()
+                + "\n\n"
+                + "GEMINI TOPO ANALYSIS\n"
+                + "=" * 60
+                + "\n"
+                + gemini_topo.strip()
+            )
+
+        results.append(result)
+
     return results
