@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { MapPin, TreePine, Compass, Mountain } from "lucide-react";
 import { browserUseIframeSrc } from "@/lib/browser-use-embed";
-import { LOADING_DURATION_MS as LOADING_MS } from "@/lib/loading-duration";
-
 const loadingSteps = [
   { icon: MapPin, text: "Searching your area..." },
   { icon: TreePine, text: "Finding natural beauty..." },
@@ -56,13 +54,12 @@ export function LoadingScreen({
     const start = Date.now();
     const tick = () => {
       const elapsed = Date.now() - start;
-      const p = Math.min(100, (elapsed / LOADING_MS) * 100);
+      // Ease toward ~90% so the bar never “finishes” while agents are still running.
+      const p = Math.min(90, 100 * (1 - Math.exp(-elapsed / 55_000)));
       setProgress(p);
-      const stepSpan = LOADING_MS / loadingSteps.length;
-      const idx = Math.min(
-        loadingSteps.length - 1,
-        Math.floor(elapsed / stepSpan)
-      );
+      const stepSpan = 10_000;
+      const idx =
+        Math.floor(elapsed / stepSpan) % loadingSteps.length;
       setCurrentStep(idx);
     };
     tick();
@@ -161,8 +158,9 @@ export function LoadingScreen({
                   style={{ width: `${progress}%` }}
                 />
               </div>
-              <p className="mt-4 font-mono text-sm text-muted-foreground">
-                {`${Math.round(progress)}% complete · ~${Math.round(LOADING_MS / 60_000)} min`}
+              <p className="mt-4 text-sm text-muted-foreground">
+                Waiting for agents to return map coordinates…{" "}
+                <span className="font-mono tabular-nums">{Math.round(progress)}%</span>
               </p>
             </div>
 

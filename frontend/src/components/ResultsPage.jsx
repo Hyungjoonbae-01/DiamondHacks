@@ -17,6 +17,34 @@ import {
 
 mapboxgl.accessToken = MAPBOX_TOKEN;
 
+/** Fingerprint of topo + community pins for incremental map updates while agents run. */
+function agentSitesSignature(sites) {
+  if (!sites?.length) return "";
+  return sites
+    .filter(
+      (s) =>
+        s.source === "topo_agent" || s.source === "community_intel"
+    )
+    .map(
+      (s) =>
+        `${s.id}:${Number(s.coordinates[0]).toFixed(5)},${Number(s.coordinates[1]).toFixed(5)}`
+    )
+    .sort()
+    .join("|");
+}
+
+/** Full list fingerprint — final sync when agents finish or list changes. */
+function allCampsitesSignature(sites) {
+  if (!sites?.length) return "";
+  return sites
+    .map(
+      (s) =>
+        `${s.id}:${s.source ?? "demo"}:${Number(s.coordinates[0]).toFixed(5)},${Number(s.coordinates[1]).toFixed(5)}`
+    )
+    .sort()
+    .join("|");
+}
+
 const FEATURE_LABELS = {
   near_water:    "Near Water",
   accessibility: "Accessible",
@@ -200,8 +228,31 @@ function parseLandRulesBlocks(raw) {
 }
 
 /** Renders plain-text policy output from the land_rules Browser Use agent. */
-function LandRulesSection({ text }) {
-  if (!text?.trim()) return null;
+function LandRulesSection({ text, loading = false }) {
+  const hasText = Boolean(text?.trim());
+  if (loading && !hasText) {
+    return (
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-emerald-900/15 bg-gradient-to-b from-emerald-950/[0.07] to-card shadow-sm dark:border-emerald-500/20 dark:from-emerald-950/25">
+        <div className="border-b border-emerald-900/10 bg-emerald-950/[0.06] px-4 py-3 dark:border-emerald-500/15 dark:bg-emerald-950/30">
+          <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600/15 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+              <ScrollText className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            Land rules
+          </h3>
+          <p className="mt-1.5 pl-9 text-[11px] leading-snug text-muted-foreground">
+            Official-style summary from the land rules agent (USFS, BLM, NPS, or state). Verify
+            before you camp.
+          </p>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin text-emerald-700/80 dark:text-emerald-400/90" aria-hidden />
+          <span>Loading land rules for this area…</span>
+        </div>
+      </div>
+    );
+  }
+  if (!hasText) return null;
   const blocks = parseLandRulesBlocks(text);
 
   return (
@@ -280,12 +331,63 @@ function LandRulesSection({ text }) {
   );
 }
 
-export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
+function MapAgentHintsBanner({ hints }) {
+  if (!hints) return null;
+  const parts = [];
+  if (hints.topo === "none") {
+    parts.push(
+      "The topo agent finished without mappable campsite coordinates."
+    );
+  }
+  if (hints.community === "none") {
+    parts.push(
+      "The community agent finished without mappable campsite coordinates."
+    );
+  }
+  if (hints.usingDemoFallback) {
+    parts.push(
+      "Pins shown are demo suggestions because no agent-returned spots were available."
+    );
+  }
+  if (!parts.length) return null;
+  return (
+    <div className="shrink-0 border-b border-amber-500/25 bg-amber-500/[0.09] px-4 py-3 dark:bg-amber-950/30">
+      <ul className="space-y-1.5 text-xs leading-snug text-amber-950 dark:text-amber-100/95">
+        {parts.map((t, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-600 dark:bg-amber-400" />
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function ResultsPage({
+  preferences,
+  campsites,
+  landRulesText,
+  landRulesPending = false,
+  mapAgentHints = null,
+  mapAgentsPending = false,
+  onBack,
+}) {
   const mapContainer  = useRef(null);
   const mapRef        = useRef(null);
   const mapLoadedRef  = useRef(false);
   const markerMapRef  = useRef(new Map()); // site.id → { marker, el }
   const poiMarkersRef = useRef([]);
+  const campsitesRef  = useRef(campsites);
+  campsitesRef.current = campsites;
+  const preferencesRef = useRef(preferences);
+  preferencesRef.current = preferences;
+
+  const prevAgentSitesSigRef = useRef("");
+  const prevFullCampsitesSigRef = useRef("");
+  const prevMapAgentsPendingRef = useRef(false);
+  const markerSyncRetryRef = useRef(0);
+  const selectedCampsiteIdRef = useRef(null);
 
   const [selectedCampsite, setSelectedCampsite] = useState(null);
   const [pois,             setPois]             = useState([]);
@@ -323,6 +425,60 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
         transform: sel ? "scale(1.2)" : "scale(1)",
       });
     });
+  }
+
+  function syncCampsiteMarkers() {
+    if (!mapLoadedRef.current || !mapRef.current) return;
+    const map = mapRef.current;
+    const list = campsitesRef.current;
+    markerMapRef.current.forEach(({ marker }) => marker.remove());
+    markerMapRef.current.clear();
+    list.forEach((site, i) => {
+      const el = makeCampsiteEl(i + 1, false, site.source ?? "demo");
+      const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
+        .setLngLat(site.coordinates)
+        .addTo(map);
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onSelectCampsiteRef.current?.(site);
+      });
+      markerMapRef.current.set(site.id, {
+        marker,
+        el,
+        source: site.source ?? "demo",
+      });
+    });
+
+    const finish = () => {
+      map.resize();
+      if (list.length > 0) {
+        const bounds = new mapboxgl.LngLatBounds();
+        list.forEach((s) => bounds.extend(s.coordinates));
+        map.fitBounds(bounds, { padding: 80, pitch: 62, bearing: -20, duration: 900 });
+      } else if (
+        preferencesRef.current.coordinates &&
+        preferencesRef.current.coordinates.length === 2
+      ) {
+        map.flyTo({
+          center: preferencesRef.current.coordinates,
+          zoom: 13,
+          pitch: 62,
+          bearing: -20,
+          duration: 700,
+        });
+      }
+      requestAnimationFrame(() => {
+        const expected = campsitesRef.current.length;
+        const actual = markerMapRef.current.size;
+        if (expected > 0 && actual !== expected && markerSyncRetryRef.current < 1) {
+          markerSyncRetryRef.current += 1;
+          syncCampsiteMarkers();
+        } else {
+          markerSyncRetryRef.current = 0;
+        }
+      });
+    };
+    requestAnimationFrame(finish);
   }
 
   // ── select campsite ────────────────────────────────────────────────────────
@@ -396,6 +552,60 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
   // Keep refs current every render
   onSelectCampsiteRef.current = onSelectCampsite;
   onSelectPOIRef.current      = onSelectPOI;
+
+  useEffect(() => {
+    const id = selectedCampsite?.id ?? null;
+    selectedCampsiteIdRef.current = id;
+    resetCampsiteMarkers(id);
+  }, [selectedCampsite?.id]);
+
+  /**
+   * While map agents run: refresh pins when topo/community coordinates change.
+   * When finished: keep full list in sync and always replot once when agents complete.
+   */
+  useEffect(() => {
+    if (!mapLoadedRef.current) return;
+
+    const agentSig = agentSitesSignature(campsites);
+    const fullSig = allCampsitesSignature(campsites);
+    const pending = mapAgentsPending;
+    const wasPending = prevMapAgentsPendingRef.current;
+
+    let shouldSyncMarkers = false;
+
+    if (pending) {
+      if (agentSig !== prevAgentSitesSigRef.current) {
+        shouldSyncMarkers = true;
+        prevAgentSitesSigRef.current = agentSig;
+      }
+    } else {
+      if (wasPending) {
+        shouldSyncMarkers = true;
+        prevAgentSitesSigRef.current = agentSig;
+        prevFullCampsitesSigRef.current = fullSig;
+      } else if (fullSig !== prevFullCampsitesSigRef.current) {
+        shouldSyncMarkers = true;
+        prevFullCampsitesSigRef.current = fullSig;
+        prevAgentSitesSigRef.current = agentSig;
+      }
+    }
+
+    prevMapAgentsPendingRef.current = pending;
+
+    if (shouldSyncMarkers) {
+      syncCampsiteMarkers();
+      resetCampsiteMarkers(selectedCampsiteIdRef.current ?? null);
+    }
+  }, [campsites, mapAgentsPending]);
+
+  const coordKey =
+    preferences.coordinates?.length === 2
+      ? `${preferences.coordinates[0]},${preferences.coordinates[1]}`
+      : "";
+  useEffect(() => {
+    if (!coordKey || !mapLoadedRef.current || !mapRef.current) return;
+    requestAnimationFrame(() => mapRef.current?.resize());
+  }, [coordKey]);
 
   // ── back to list ───────────────────────────────────────────────────────────
   function handleBackToList() {
@@ -576,29 +786,7 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
         paint:  { "line-color": "#2563eb", "line-width": 5, "line-opacity": 0.92 },
       });
 
-      // ── Campsite markers ──────────────────────────────────────────────────
-      campsites.forEach((site, i) => {
-        const el = makeCampsiteEl(i + 1, false, site.source ?? "demo");
-        const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
-          .setLngLat(site.coordinates)
-          .addTo(map);
-        el.addEventListener("click", (e) => {
-          e.stopPropagation();
-          onSelectCampsiteRef.current?.(site);
-        });
-        markerMapRef.current.set(site.id, {
-          marker,
-          el,
-          source: site.source ?? "demo",
-        });
-      });
-
-      // Fit all markers
-      if (campsites.length > 0) {
-        const bounds = new mapboxgl.LngLatBounds();
-        campsites.forEach((s) => bounds.extend(s.coordinates));
-        map.fitBounds(bounds, { padding: 80, pitch: 62, bearing: -20 });
-      }
+      syncCampsiteMarkers();
     });
 
     return () => {
@@ -610,10 +798,30 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen min-h-0 overflow-hidden bg-background">
 
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <div className="w-[380px] shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
+      <div className="flex h-full min-h-0 w-[380px] shrink-0 flex-col border-r border-border bg-card overflow-hidden">
+
+        {(mapAgentsPending || landRulesPending) && (
+          <div
+            className="flex shrink-0 items-center gap-2.5 border-b border-border bg-muted/40 px-4 py-2.5"
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground/70"
+              aria-hidden
+            />
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {mapAgentsPending && landRulesPending
+                ? "Agents are still fetching map pins and land rules…"
+                : mapAgentsPending
+                  ? "Agents are still fetching map coordinates…"
+                  : "Loading land rules for this area…"}
+            </p>
+          </div>
+        )}
 
         {/* Header */}
         <div className="px-4 pt-4 pb-3 border-b border-border shrink-0">
@@ -636,8 +844,10 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
           )}
         </div>
 
+        <MapAgentHintsBanner hints={mapAgentHints} />
+
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
 
           {/* ── Campsite list ── */}
           {!selectedCampsite && (
@@ -691,9 +901,9 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
                   </div>
                 </button>
               ))}
-              {landRulesText && (
+              {(landRulesPending || landRulesText?.trim()) && (
                 <div className="px-0 pt-2 pb-1">
-                  <LandRulesSection text={landRulesText} />
+                  <LandRulesSection text={landRulesText} loading={landRulesPending} />
                 </div>
               )}
             </div>
@@ -727,9 +937,9 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
                 </div>
               )}
 
-              {landRulesText && (
+              {(landRulesPending || landRulesText?.trim()) && (
                 <div className="mb-5">
-                  <LandRulesSection text={landRulesText} />
+                  <LandRulesSection text={landRulesText} loading={landRulesPending} />
                 </div>
               )}
 
@@ -822,7 +1032,7 @@ export function ResultsPage({ preferences, campsites, landRulesText, onBack }) {
       </div>
 
       {/* ── Map ──────────────────────────────────────────────────────────── */}
-      <div ref={mapContainer} className="flex-1 min-w-0" />
+      <div ref={mapContainer} className="min-h-0 min-w-0 flex-1" />
     </div>
   );
 }

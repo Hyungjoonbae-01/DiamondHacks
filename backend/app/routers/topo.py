@@ -18,6 +18,30 @@ from app.schemas.topo import (
 router = APIRouter(tags=["topo"])
 
 
+def _session_agent_finished(session: Any) -> bool:
+    """True when Browser Use output exists or the session reached a terminal status."""
+    output = getattr(session, "output", None)
+    if output is not None:
+        return True
+    status = getattr(session, "status", None)
+    if status is None:
+        return False
+    s = str(status).lower()
+    return any(
+        term in s
+        for term in (
+            "complete",
+            "fail",
+            "stopped",
+            "cancel",
+            "error",
+            "done",
+            "terminated",
+            "closed",
+        )
+    )
+
+
 @router.post("/topo/ingest")
 def ingest_topo_json(
     body: TopoIngestBody,
@@ -80,6 +104,7 @@ async def get_topo_session_result(
     if output is None:
         return {
             "ready": False,
+            "agent_finished": _session_agent_finished(session),
             "session_status": str(status) if status is not None else None,
         }
 
@@ -88,6 +113,7 @@ async def get_topo_session_result(
     except (ValueError, TypeError) as e:
         return {
             "ready": False,
+            "agent_finished": True,
             "session_status": str(status) if status is not None else None,
             "parse_error": str(e),
             "raw_output_preview": (str(output)[:800] if output is not None else None),
@@ -96,6 +122,7 @@ async def get_topo_session_result(
     if not candidates:
         return {
             "ready": False,
+            "agent_finished": True,
             "session_status": str(status) if status is not None else None,
             "raw_output_preview": (str(output)[:800] if output is not None else None),
         }
@@ -108,6 +135,7 @@ async def get_topo_session_result(
     if not sites:
         return {
             "ready": False,
+            "agent_finished": True,
             "session_status": str(status) if status is not None else None,
             "candidates": [c.model_dump(mode="json", exclude_none=False) for c in candidates],
             "reason": "no_valid_coordinates",
@@ -115,6 +143,7 @@ async def get_topo_session_result(
 
     return {
         "ready": True,
+        "agent_finished": True,
         "session_status": str(status) if status is not None else None,
         "candidates": [c.model_dump(mode="json", exclude_none=False) for c in candidates],
         "sites": sites,
@@ -140,12 +169,14 @@ async def get_land_rules_session_result(session_id: str) -> dict[str, Any]:
     if output is None:
         return {
             "ready": False,
+            "agent_finished": _session_agent_finished(session),
             "session_status": str(status) if status is not None else None,
         }
 
     text = str(output).strip()
     return {
         "ready": True,
+        "agent_finished": True,
         "session_status": str(status) if status is not None else None,
         "text": text,
     }
