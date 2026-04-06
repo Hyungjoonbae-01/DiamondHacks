@@ -1,4 +1,5 @@
 import { useState } from "react";
+import logo from "../assets/logo.png";
 import {
   Search,
   MapPin,
@@ -109,11 +110,24 @@ export function PreferencesForm({ onSubmit }) {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-16">
+    <div
+      className="min-h-screen bg-background bg-[length:80px_80px] [background-image:linear-gradient(rgba(0,0,0,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.06)_1px,transparent_1px)] dark:[background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)]"
+    >
+      <div className="fixed left-5 top-5 z-20 md:left-8 md:top-8">
+        <img
+          src={logo}
+          alt=""
+          className="h-9 w-auto md:h-10"
+          decoding="async"
+        />
+      </div>
+      <form
+        onSubmit={handleSubmit}
+        className="relative z-10 max-w-3xl mx-auto px-8 py-16"
+      >
         {/* Header */}
         <div className="mb-10">
-          <h1 className="font-display text-4xl md:text-5xl font-normal leading-tight text-foreground mb-3">
+          <h1 className="font-display text-5xl md:text-6xl font-normal leading-tight text-foreground mb-3">
             Where will your adventure begin?
           </h1>
           <p className="text-muted-foreground text-base leading-relaxed">
